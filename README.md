@@ -60,7 +60,7 @@ submitting it to the pool. Set `browser_mining` to `false` in `config.json` to d
 
 | Key | Default | Meaning |
 |---|---|---|
-| `btc_address` | (author's) | **change this** — where your winnings would go |
+| `btc_address` | `""` (empty) | **required** — your own address; the miner refuses to start without it |
 | `worker_name` | `sticks` | worker suffix for the USB sticks |
 | `cpu_mining` | `true` | let your CPU play |
 | `cpu_workers` | `0` | 0 = auto (cores − 1); set a number to limit heat/noise |
