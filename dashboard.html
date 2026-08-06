@@ -1,0 +1,760 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#070a07">
+<title>MINERS — Bitcoin Lottery</title>
+<link rel="manifest" href="/manifest.json">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icon.svg">
+<style>
+  :root{
+    --bg:#070a07; --panel:#0e130e; --panel2:#131b13;
+    --ink:#b7e4bf; --ink-mut:#6d8f74; --ink-dim:#435941;
+    --hero:#3aff77; --grid:#1b251b; --border:#234023;
+    --s1:#1ea452; --s2:#2790c4; --s3:#b57a00;      /* chart series (validated palette) */
+    --gold:#ffc832; --amber:#ffb000; --err:#ff5555; --ok:#3aff77; --fire:#ff7a1a;
+  }
+  *{box-sizing:border-box; margin:0; padding:0}
+  /* Firefox only (Chrome must NOT see scrollbar-color, or it ignores the rules below) */
+  @supports not selector(::-webkit-scrollbar){
+    *{scrollbar-color:#1d4023 #0b100b; scrollbar-width:thin}
+  }
+  /* Chrome / Edge */
+  ::-webkit-scrollbar{width:12px; height:12px}
+  ::-webkit-scrollbar-track{background:#0b100b}
+  ::-webkit-scrollbar-thumb{background:#1d4023; border:2px solid #0b100b; border-radius:6px}
+  ::-webkit-scrollbar-thumb:hover{background:#2c5a33}
+  ::-webkit-scrollbar-button{display:none; width:0; height:0}
+  ::-webkit-scrollbar-corner{background:#0b100b}
+  html,body{background:var(--bg); color:var(--ink);
+    font-family:Consolas,"Cascadia Mono","Courier New",monospace; font-size:15px; overflow-x:hidden}
+  body::after{content:""; position:fixed; inset:0; pointer-events:none; z-index:40;
+    background:repeating-linear-gradient(0deg, rgba(0,0,0,.15) 0 1px, transparent 1px 3px)}
+  .wrap{max-width:1100px; margin:0 auto; padding:16px 14px 40px}
+  section{border:1px solid var(--border); background:var(--panel); margin-bottom:14px}
+  section>h2{font-size:12px; letter-spacing:.15em; color:var(--ink-mut); font-weight:normal;
+    padding:8px 14px; border-bottom:1px solid var(--border); text-transform:uppercase}
+  section>h2::before{content:"» "; color:var(--hero)}
+
+  header.small{display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px;
+    color:var(--ink-mut); font-size:13px; padding:4px 2px 12px; align-items:center}
+  header.small .logo{color:var(--hero); text-shadow:0 0 8px rgba(58,255,119,.45); font-size:15px}
+  .led{display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:6px;
+    background:var(--ok); box-shadow:0 0 8px var(--ok); animation:puls 2s infinite}
+  .led.off{background:var(--err); box-shadow:0 0 8px var(--err); animation:none}
+  @keyframes puls{50%{opacity:.5}}
+  .blocknum{color:var(--gold)}
+
+  .jack{position:relative; border:2px solid var(--gold); background:var(--panel);
+    padding:16px 18px 18px; margin-bottom:14px; text-align:center; overflow:hidden;
+    box-shadow:0 0 22px rgba(255,200,50,.14), inset 0 0 40px rgba(255,200,50,.05)}
+  .jack::before,.jack::after{content:""; position:absolute; left:0; right:0; height:6px;
+    background:repeating-linear-gradient(90deg, var(--gold) 0 14px, transparent 14px 28px);
+    animation:chase 1.1s linear infinite}
+  .jack::before{top:0} .jack::after{bottom:0; animation-direction:reverse}
+  @keyframes chase{to{background-position:28px 0}}
+  .j-title{color:var(--gold); letter-spacing:.5em; font-size:14px; text-transform:uppercase;
+    text-shadow:0 0 12px rgba(255,200,50,.6); animation:jblink 2.4s steps(1) infinite}
+  @keyframes jblink{50%{opacity:.55}}
+  .j-btc{font-size:50px; color:var(--gold); margin:6px 0 0; font-weight:bold;
+    text-shadow:0 0 18px rgba(255,200,50,.55), 0 0 60px rgba(255,200,50,.25);
+    font-variant-numeric:tabular-nums}
+  .j-usd{font-size:22px; color:var(--gold); opacity:.9; margin:2px 0 4px}
+  .j-sub{color:var(--ink-mut); font-size:13px}
+  .j-draw{margin-top:8px; font-size:12px; color:var(--ink-dim); letter-spacing:.12em}
+
+  .fusebox{padding:18px 18px 12px}
+  .fuse-row{display:flex; align-items:center; gap:12px}
+  .goalorb{width:26px; height:26px; border-radius:50%; flex:none; position:relative; z-index:2;
+    background:radial-gradient(circle at 35% 35%, #3a2c06, #150f04);
+    border:2px solid var(--gold); box-shadow:0 0 12px rgba(255,200,50,.55)}
+  .goalorb::after{content:""; position:absolute; inset:7px; border-radius:50%;
+    background:var(--gold); opacity:.85; animation:jblink 2.4s steps(1) infinite}
+  .goal-lbl{color:var(--gold); font-size:10px; letter-spacing:.12em; margin-left:6px}
+  .fuse-track{position:relative; flex:1; height:14px}
+  .fuse-burned{position:absolute; left:0; top:6px; height:2px; width:0;
+    background:repeating-linear-gradient(90deg, #3a3126 0 4px, transparent 4px 8px)}
+  .fuse-line{position:absolute; right:0; top:5px; height:4px; width:100%;
+    background:linear-gradient(90deg,#7a5b2a,#c98f3d); border-radius:2px;
+    box-shadow:0 0 6px rgba(201,143,61,.4); transition:width 1s linear}
+  .spark{position:absolute; top:-2px; width:18px; height:18px; margin-left:-9px; z-index:1;
+    border-radius:50%; background:radial-gradient(circle,#fff 0 15%,var(--fire) 40%,transparent 70%);
+    animation:sparkle .12s infinite alternate; filter:drop-shadow(0 0 8px var(--fire))}
+  @keyframes sparkle{from{transform:scale(.8) rotate(10deg)} to{transform:scale(1.25) rotate(-14deg)}}
+  .fuse-info{display:flex; justify-content:space-between; margin-top:10px;
+    color:var(--ink-mut); font-size:13px; flex-wrap:wrap; gap:6px}
+  .fuse-info b{color:var(--hero); font-weight:normal}
+  .fuse-late{color:var(--fire); animation:jblink 1s steps(1) infinite}
+
+  #strikeFx{position:fixed; inset:0; display:none; z-index:60; pointer-events:none;
+    background:radial-gradient(circle, rgba(255,122,26,.28), transparent 65%);
+    align-items:center; justify-content:center; text-align:center}
+  #strikeFx .txt{font-size:44px; color:#fff; letter-spacing:.15em; font-weight:bold;
+    text-shadow:0 0 24px var(--fire), 0 0 80px var(--fire); animation:recpop 3.2s ease-out forwards}
+  #strikeFx .sub{font-size:16px; color:var(--gold); margin-top:8px; letter-spacing:.1em}
+
+  .meterbox{padding:20px 18px 14px}
+  .meter{position:relative; height:34px; border:1px solid var(--border); background:
+    linear-gradient(90deg, #0d140d 0%, #14240f 55%, #2b2408 85%, #3a2c06 100%)}
+  .meter .fill{position:absolute; top:0; bottom:0; left:0;
+    background:linear-gradient(90deg, rgba(58,255,119,.16), rgba(58,255,119,.42));
+    border-right:2px solid var(--hero); box-shadow:0 0 14px rgba(58,255,119,.5);
+    transition:width 1.2s cubic-bezier(.2,.8,.2,1)}
+  .meter .goal{position:absolute; right:0; top:-6px; bottom:-6px; width:3px; background:var(--gold);
+    box-shadow:0 0 12px var(--gold)}
+  .meter .marker{position:absolute; top:-9px; width:2px; bottom:-9px; background:var(--ok);
+    box-shadow:0 0 8px var(--ok)}
+  .meter-scale{display:flex; justify-content:space-between; color:var(--ink-dim); font-size:11px; margin-top:6px}
+  .meter-labels{display:flex; justify-content:space-between; margin-top:10px; font-size:13px}
+  .meter-labels .l{color:var(--ink-mut)} .meter-labels .r{color:var(--gold); text-align:right}
+  .meter-labels b{color:var(--hero); font-weight:normal}
+  .meter-note{margin-top:8px; color:var(--ink-dim); font-size:12px}
+
+  .draw{display:flex; flex-wrap:wrap; gap:16px; padding:16px 18px; align-items:center}
+  .reels{display:flex; gap:6px}
+  .reel{width:44px; height:60px; border:1px solid var(--border); background:var(--panel2);
+    display:flex; align-items:center; justify-content:center; font-size:30px; color:var(--hero);
+    text-shadow:0 0 10px rgba(58,255,119,.5); font-variant-numeric:tabular-nums}
+  .reel.spin{color:var(--ink-mut); text-shadow:none; animation:reelshake .09s infinite}
+  @keyframes reelshake{50%{transform:translateY(-2px)}}
+  .draw-info{flex:1; min-width:220px; font-size:14px; line-height:1.8}
+  .draw-info .big{font-size:20px; color:var(--hero)}
+  .draw-info .dim{color:var(--ink-dim); font-size:12px}
+  .tickets{color:var(--amber); font-size:13px}
+
+  #recordFx{position:fixed; inset:0; display:none; z-index:50; pointer-events:none;
+    background:radial-gradient(circle, rgba(255,200,50,.16), transparent 60%);
+    align-items:center; justify-content:center}
+  #recordFx .txt{font-size:56px; color:var(--gold); letter-spacing:.2em; font-weight:bold;
+    text-shadow:0 0 24px var(--gold); animation:recpop 2.6s ease-out forwards}
+  @keyframes recpop{0%{transform:scale(.4); opacity:0} 12%{transform:scale(1.12); opacity:1}
+    22%{transform:scale(1)} 80%{opacity:1} 100%{opacity:0}}
+
+  .tiles{display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:10px; margin-bottom:14px}
+  .tile{border:1px solid var(--border); background:var(--panel); padding:11px 14px}
+  .t-label{color:var(--ink-mut); font-size:11px; text-transform:uppercase; letter-spacing:.12em}
+  .t-value{color:var(--hero); font-size:27px; margin-top:4px;
+    text-shadow:0 0 10px rgba(58,255,119,.35); font-variant-numeric:tabular-nums}
+  .t-sub{color:var(--ink-dim); font-size:12px; margin-top:2px}
+  .tile.gold .t-value{color:var(--gold); text-shadow:0 0 10px rgba(255,200,50,.4)}
+  .up{color:var(--ok)} .down{color:var(--err)}
+
+  table{width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums}
+  th,td{padding:8px 14px; text-align:left; font-size:14px}
+  th{color:var(--ink-dim); font-weight:normal; font-size:11px; text-transform:uppercase;
+    letter-spacing:.1em; border-bottom:1px solid var(--grid)}
+  td{border-bottom:1px solid var(--grid)} tr:last-child td{border-bottom:none}
+  .chip{display:inline-block; width:10px; height:10px; margin-right:8px}
+  .num{text-align:right} th.num{text-align:right} .st-ok{color:var(--ok)} .st-err{color:var(--err)}
+  .chartbox{padding:10px 14px 4px; position:relative}
+  .legend{display:flex; gap:18px; padding:6px 14px 12px; color:var(--ink-mut); font-size:13px}
+  .tip{position:absolute; display:none; background:var(--panel2); border:1px solid var(--border);
+    padding:8px 10px; font-size:13px; pointer-events:none; z-index:5; min-width:150px}
+  .tip b{color:var(--hero); font-weight:normal}
+  .log{padding:10px 14px; height:140px; overflow-y:auto; font-size:13px; line-height:1.7}
+  .log .t{color:var(--ink-dim)} .log .okx{color:var(--ok)} .log .gx{color:var(--gold)} .log .fx{color:var(--fire)}
+  footer{color:var(--ink-dim); font-size:12px; text-align:center; margin-top:16px; line-height:1.8}
+  footer .a{color:var(--ink-mut)}
+  footer a{color:var(--amber); text-decoration:none}
+  footer a:hover{text-shadow:0 0 8px rgba(255,176,0,.6)}
+
+  /* tables and the chart scroll sideways instead of breaking the layout */
+  .twrap{overflow-x:auto}
+  .chartbox{overflow-x:auto}
+  .chartbox svg{min-width:660px}
+
+  /* ---------- small screens (phones) ---------- */
+  @media (max-width:640px){
+    html,body{font-size:14px}
+    header.small .logo{font-size:13px}
+    .j-btc{font-size:36px}
+    .j-usd{font-size:17px}
+    .reels{gap:4px}
+    .reel{width:34px; height:46px; font-size:21px}
+    th,td{padding:7px 8px; font-size:13px}
+    th:nth-child(2), td:nth-child(2){display:none}   /* hide the Port column */
+    .t-value{font-size:22px}
+    .meter-labels .r span{font-size:18px !important}
+    .log{font-size:12px}
+    .donbox{flex-direction:column; gap:8px}
+    #donAddr{font-size:12px}
+  }
+</style>
+</head>
+<body>
+<div id="recordFx"><div class="txt">★ NEW RECORD ★</div></div>
+<div id="strikeFx"><div><div class="txt">⚡ STRIKE — BLOCK FOUND ⚡</div>
+  <div class="sub">the network drew a winner · a new game begins</div></div></div>
+<div class="wrap">
+
+  <header class="small">
+    <div class="logo">▓▒░ MINERS — BITCOIN LOTTERY ░▒▓</div>
+    <div><span class="led off" id="minerLed"></span><span id="minerState">miner: connecting…</span> ·
+      <a id="poolLink" href="https://web.public-pool.io/" target="_blank" rel="noopener"
+         style="color:var(--amber); text-decoration:none">pool stats ↗</a> ·
+      block <span class="blocknum" id="blockH">—</span> · uptime <span id="uptime">—</span></div>
+    <div style="width:100%; text-align:center; font-size:13px; color:var(--ink-dim)">
+      "player": <a id="playerAddr" href="#" target="_blank" rel="noopener"
+        title="view this address on the blockchain (mempool.space)"
+        style="color:var(--ink-mut); text-decoration:none; border-bottom:1px dotted var(--ink-dim)">—</a></div>
+  </header>
+
+  <div class="jack">
+    <div class="j-title">☆ Jackpot ☆</div>
+    <div class="j-btc">3.125 BTC</div>
+    <div class="j-usd" id="jackUsd">≈ $ …</div>
+    <div class="j-sub">block reward + fees — all of it goes to your address</div>
+    <div class="j-draw">A NEW BLOCK EVERY ~10 MINUTES · YOU PLAY AGAINST THE WHOLE WORLD</div>
+  </div>
+
+  <section>
+    <h2>Next block — the network is "drawing"</h2>
+    <div class="fusebox">
+      <div class="fuse-row">
+        <div class="fuse-track">
+          <div class="fuse-burned" id="fuseBurned"></div>
+          <div class="fuse-line" id="fuseLine"></div>
+          <div class="spark" id="spark" style="left:0%"></div>
+        </div>
+        <div class="goalorb" title="BLOCK"></div><span class="goal-lbl">BLOCK</span>
+      </div>
+      <div class="fuse-info">
+        <span>since last block: <b id="fuseAge">—</b></span>
+        <span id="fuseNote">average block time: ~10 min</span>
+        <span>last "draw" won by: <b id="lastWinner" style="color:var(--gold)">—</b></span>
+        <span>block height: <b id="fuseBlock">—</b></span>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Lottery-o-meter — how close your best "ticket" came</h2>
+    <div class="meterbox">
+      <div class="meter">
+        <div class="fill" id="mFill" style="width:0%"></div>
+        <div class="marker" id="mToday" style="left:0%" title="session best"></div>
+        <div class="goal" title="JACKPOT"></div>
+      </div>
+      <div class="meter-scale">
+        <span>diff 1</span><span>1 k</span><span>1 M</span><span>1 G</span><span>1 T</span>
+        <span style="color:var(--gold)" id="netDiffLbl">— = BLOCK</span>
+      </div>
+      <div class="meter-labels">
+        <div class="l">best "ticket" all-time: <b id="mBestTxt">—</b><br>
+          <span style="font-size:12px">this session's best: <span id="mTodayTxt" style="color:var(--ok)">—</span></span></div>
+        <div class="r">to the jackpot<br><span id="mPct" style="font-size:22px">—</span></div>
+      </div>
+      <div class="meter-note">log scale — every tick is 1000× more; and still, the NEXT "ticket" could hit the end ⚡</div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Play from this device</h2>
+    <div style="padding:16px 18px; display:flex; gap:16px; align-items:center; flex-wrap:wrap">
+      <button id="playBtn" style="background:var(--panel2); color:var(--hero);
+        border:2px solid var(--hero); padding:12px 26px; font-family:inherit; font-size:16px;
+        letter-spacing:.18em; cursor:pointer; text-shadow:0 0 8px rgba(58,255,119,.5)">▶ PLAY</button>
+      <div style="flex:1; min-width:240px; font-size:13px; line-height:1.8; color:var(--ink-mut)">
+        <div id="playState">for OTHER devices — open this page on a phone or tablet and tap PLAY there</div>
+        <div class="dim" id="playRate" style="color:var(--ink-dim); font-size:12px">
+          no install needed · hashing runs in that browser tab · STOP or close = leave the game</div>
+        <div id="playHint" style="color:var(--amber); font-size:12px; display:none">
+          ⚠ this looks like the mining PC itself — pressing PLAY here only steals CPU from the miner;
+          open <span id="playUrl">http://PC-IP:8888</span> on your phone instead</div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Last "draw"</h2>
+    <div class="draw">
+      <div class="reels" id="reels"></div>
+      <div class="draw-info">
+        <div>"ticket" (nonce) <span class="big" id="drawDiff">—</span> <span class="dim">difficulty</span></div>
+        <div class="dim" id="drawWho">waiting for the first "draw"…</div>
+        <div class="tickets" id="tickets">🎟 "tickets" this session: 0</div>
+      </div>
+    </div>
+  </section>
+
+  <div class="tiles">
+    <div class="tile gold"><div class="t-label">BTC price</div>
+      <div class="t-value" id="tPrice">—</div><div class="t-sub" id="tPriceSub">loading price…</div></div>
+    <div class="tile"><div class="t-label">"Draw" rate</div>
+      <div class="t-value" id="tHash">—</div><div class="t-sub">every hash is a "ticket"</div></div>
+    <div class="tile"><div class="t-label">"Tickets" accepted</div>
+      <div class="t-value" id="tOk">—</div><div class="t-sub" id="tOkSub">rejected: —</div></div>
+    <div class="tile gold"><div class="t-label">Best "ticket"</div>
+      <div class="t-value" id="tBest">—</div><div class="t-sub">personal record</div></div>
+  </div>
+
+  <section>
+    <h2>Machines in the game</h2>
+    <div class="twrap"><table>
+      <thead><tr><th>Device</th><th>Port</th><th>Status</th>
+        <th class="num">Rate</th><th class="num">"Tickets"</th></tr></thead>
+      <tbody id="fleetBody">
+        <tr><td colspan="5" style="color:var(--ink-dim)">waiting for the miner…</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section>
+    <h2>"Draw" rate — last 60 minutes</h2>
+    <div class="chartbox">
+      <svg id="chart" width="100%" height="210" viewBox="0 0 1040 210" preserveAspectRatio="none"></svg>
+      <div class="tip" id="tip"></div>
+    </div>
+    <div class="legend" id="legend"></div>
+  </section>
+
+  <section>
+    <h2>"Draws"</h2>
+    <div class="log" id="log"></div>
+  </section>
+
+  <div class="donbox" style="border:1px solid var(--border); background:var(--panel); padding:14px 18px;
+      display:flex; align-items:center; justify-content:center; gap:14px; flex-wrap:wrap">
+    <span style="display:inline-flex; flex:none; width:34px; height:34px; border-radius:50%;
+      background:#f7931a; color:#fff; font-size:22px; font-weight:bold;
+      align-items:center; justify-content:center;
+      box-shadow:0 0 12px rgba(247,147,26,.5)">&#8383;</span>
+    <span style="color:var(--ink-mut); font-size:13px">donating bitcoin:</span>
+    <span class="a" id="donAddr" style="font-size:14px; word-break:break-all;
+      max-width:100%; text-align:center">bc1qrw38lsml6anen4np6k5j0fdrjf4fa2jqhm8qw5</span>
+    <button id="copyBtn" style="background:var(--panel2); color:var(--amber);
+      border:1px solid var(--amber); padding:6px 14px; font-family:inherit; font-size:12px;
+      letter-spacing:.1em; cursor:pointer" title="copy the address">&#10064; COPY</button>
+  </div>
+  <footer>
+    <div>retro bitcoin lottery · LIVE · chain &amp; price via mempool.space + CoinGecko</div>
+    <div>Powered by <a href="https://proofofforge.com/" target="_blank" rel="noopener">Proof of Forge</a></div>
+    <div>MINERS — Bitcoin Lottery · v1.0 · 2026</div>
+  </footer>
+</div>
+
+<script>
+"use strict";
+/* ============ DATA SOURCE: the running miner (port 8888) ============ */
+const API = location.protocol === "file:" ? "http://localhost:8888" : "";
+let NET_DIFF = 126.23e12, LOG_MAX = Math.log10(NET_DIFF);
+const COLS = ["#1ea452", "#2790c4", "#b57a00"];
+const CPU_COL = "#8a8a8a";
+// color follows the device, not its position: sticks take the fixed palette, the CPU is always grey
+const colFor = (name, i) => name.startsWith("CPU") ? CPU_COL : COLS[i % COLS.length];
+const fmt = (x, d=2) => x.toLocaleString("en-US", {minimumFractionDigits:d, maximumFractionDigits:d});
+const fmtRate = hs => hs>=1e9 ? fmt(hs/1e9,2)+" GH/s" : hs>=1e6 ? fmt(hs/1e6,2)+" MH/s" :
+                      hs>=1e3 ? fmt(hs/1e3,1)+" kH/s" : fmt(hs,0)+" H/s";
+const fmtDiff = d => d>=1e12?fmt(d/1e12,2)+" T" : d>=1e9?fmt(d/1e9,2)+" G" :
+                     d>=1e6?fmt(d/1e6,2)+" M" : d>=1e3?fmt(d/1e3,2)+" k" : fmt(d,0);
+const logEl = document.getElementById("log");
+function log(msg, cls=""){ const t = new Date().toLocaleTimeString("en-GB");
+  logEl.insertAdjacentHTML("afterbegin",
+    `<div><span class="t">[${t}]</span> <span class="${cls}">${msg}</span></div>`);
+  while (logEl.children.length > 80) logEl.lastChild.remove(); }
+log("lottery dashboard started — waiting for the miner on port 8888…");
+
+/* ============ SLOT REELS ============ */
+const reelsEl = document.getElementById("reels"); const HEXC = "0123456789ABCDEF";
+for (let i=0;i<8;i++) reelsEl.insertAdjacentHTML("beforeend", `<div class="reel">·</div>`);
+const reels = [...reelsEl.children];
+function spinNonce(hex, who, diff){
+  reels.forEach(r=>r.classList.add("spin"));
+  let t = 0; const iv = setInterval(()=>{
+    reels.forEach((r,i)=>{ if (t < 6+i*2) r.textContent = HEXC[Math.random()*16|0];
+      else { r.textContent = hex[i]; r.classList.remove("spin"); }});
+    if (++t > 6+8*2){ clearInterval(iv);
+      document.getElementById("drawDiff").textContent = fmtDiff(diff);
+      document.getElementById("drawWho").textContent = `drawn by ${who} · sent to the pool`; }
+  }, 70);
+}
+
+/* ============ EFEKTY ============ */
+function recordFx(){ const el = document.getElementById("recordFx");
+  el.style.display = "flex"; setTimeout(()=>el.style.display="none", 2600); }
+function strike(h, winner){ const el = document.getElementById("strikeFx");
+  el.style.display = "flex"; setTimeout(()=>el.style.display="none", 3200);
+  log(`⚡ STRIKE — block ${h.toLocaleString("en-US")} won by ${winner || "unknown miner"} · a new game begins`, "fx"); }
+
+/* ============ MINER STATS (every 2 s) ============ */
+let prevBest = null, seenDraws = new Set(), samples = [];
+async function fetchStats(){
+  const led = document.getElementById("minerLed"), state = document.getElementById("minerState");
+  try{
+    const r = await fetch(API + "/stats.json", {cache:"no-store"});
+    const st = await r.json();
+    led.className = "led"; state.textContent = st.pool.connected
+      ? `miner: in the game · ${st.pool.host} · pool diff ${st.pool.difficulty}`
+      : "miner: running, pool reconnecting…";
+    render(st);
+  }catch(e){
+    led.className = "led off";
+    state.textContent = "miner: OFFLINE — run START_MINING.bat";
+  }
+}
+function render(st){
+  if (st.lan) document.getElementById("playUrl").textContent =
+    `http://${st.lan}:${st.port || 8888}`;
+  const pa = document.getElementById("playerAddr");
+  pa.textContent = st.address;
+  pa.href = "https://mempool.space/address/" + st.address;
+  document.getElementById("poolLink").href = "https://web.public-pool.io/#/app/" + st.address;
+  const up = Math.max(0, Date.now()/1000 - st.start) | 0;
+  document.getElementById("uptime").textContent =
+    `${up/3600|0}:${String(up/60%60|0).padStart(2,"0")}:${String(up%60|0).padStart(2,"0")}`;
+
+  const total = st.devices.reduce((a,d)=>a+d.hs, 0);
+  document.getElementById("tHash").textContent = fmtRate(total);
+  document.getElementById("tOk").textContent = st.accepted;
+  document.getElementById("tOkSub").textContent = "rejected: " + st.rejected;
+  document.getElementById("tickets").textContent =
+    `🎟 "tickets" this session: ${st.accepted}`;
+
+  const best = Math.max(st.best_alltime, st.best_session);
+  if (best > 0){
+    document.getElementById("tBest").textContent = fmtDiff(best);
+    document.getElementById("mBestTxt").textContent = fmtDiff(best);
+    document.getElementById("mFill").style.width =
+      Math.max(0, Math.log10(best)/LOG_MAX*100).toFixed(1) + "%";
+    document.getElementById("mPct").textContent =
+      ((1 - Math.log10(best)/LOG_MAX)*100).toFixed(0) + "% of the scale";
+    if (prevBest !== null && best > prevBest){ recordFx();
+      log(`★ NEW RECORD — "ticket" diff ${fmtDiff(best)}`, "gx"); }
+    prevBest = best;
+  }
+  if (st.best_session > 1){
+    document.getElementById("mToday").style.left =
+      (Math.log10(st.best_session)/LOG_MAX*100).toFixed(1) + "%";
+    document.getElementById("mTodayTxt").textContent = fmtDiff(st.best_session);
+  }
+
+  const tb = document.getElementById("fleetBody");
+  tb.innerHTML = st.devices.map((d,i)=>`<tr>
+      <td><span class="chip" style="background:${colFor(d.name,i)}"></span>${d.name}</td>
+      <td>${d.port}</td><td class="st-ok">● in the game</td>
+      <td class="num">${fmtRate(d.hs)}</td><td class="num">${d.shares}</td></tr>`).join("")
+    || `<tr><td colspan="5" class="st-err">no machine connected — plug a stick in (or enable cpu_mining in config.json)</td></tr>`;
+  document.getElementById("legend").innerHTML = st.devices.map((d,i)=>
+    `<span><span class="chip" style="background:${colFor(d.name,i)}"></span>${d.name}</span>`).join("");
+
+  for (const d of [...st.draws].reverse()){
+    const key = d.t + d.nonce;
+    if (seenDraws.has(key)) continue;
+    seenDraws.add(key);
+    if (seenDraws.size > 400) seenDraws = new Set([...seenDraws].slice(-200));
+    spinNonce(d.nonce, d.who, d.diff);
+    log(`"ticket" sent — diff ${fmtDiff(d.diff)} (${d.who})`, "okx");
+  }
+
+  samples.push({t: Date.now(), g: st.devices.map(d=>d.hs)});
+  while (samples.length && samples[0].t < Date.now() - 3660e3) samples.shift();
+  drawChart(st.devices);
+}
+
+/* ============ CHART (per-minute averages, last 60 min) ============ */
+const svg = document.getElementById("chart"), tip = document.getElementById("tip");
+const W=1040, H=210, L=46, R=110, T=10, B=24;
+let chartData = [], chartNames = [];
+function seriesData(n){
+  const now = Date.now(), out = Array.from({length:n}, ()=>Array(60).fill(null));
+  for (const s of samples){
+    const idx = 59 - Math.floor((now - s.t)/60000); if (idx < 0) continue;
+    s.g.forEach((v,d)=>{ if (d<n){ const a = out[d];
+      a[idx] = a[idx]===null ? v : (a[idx]+v)/2; }});
+  }
+  out.forEach(a=>{ let last = 0;
+    for (let i=0;i<60;i++){ if (a[i]===null) a[i]=last; else last=a[i]; }});
+  return out;
+}
+function drawChart(devs){
+  chartNames = devs.map(d=>d.name);
+  chartData = seriesData(devs.length);
+  // adaptive unit: GH/s for sticks, MH/s or kH/s when only a CPU is playing
+  const umax = Math.max(1, ...chartData.flat());
+  const [uf, un] = umax>=1e9 ? [1e9,"GH/s"] : umax>=1e6 ? [1e6,"MH/s"] :
+                   umax>=1e3 ? [1e3,"kH/s"] : [1,"H/s"];
+  const ymax = Math.max(1, Math.ceil(umax/uf));
+  const x = i => L + (W-L-R)*i/59, y = v => T + (H-T-B)*(1 - (v/uf)/ymax);
+  let g = "";
+  for (let v=0; v<=ymax; v+=Math.max(1, Math.ceil(ymax/6)))
+    g += `<line x1="${L}" y1="${y(v*uf)}" x2="${W-R}" y2="${y(v*uf)}" stroke="var(--grid)"/>`
+       + `<text x="${L-8}" y="${y(v*uf)+4}" fill="var(--ink-dim)" font-size="11" text-anchor="end">${v}</text>`;
+  g += `<text x="${L-8}" y="${T+2}" fill="var(--ink-dim)" font-size="10" text-anchor="end">${un}</text>`;
+  [-60,-45,-30,-15,0].forEach(m=>{ const xi = x(Math.max(0, 59+m));
+    g += `<text x="${xi}" y="${H-6}" fill="var(--ink-dim)" font-size="11" text-anchor="middle">${m ? m+" min" : "now"}</text>`});
+  chartData.forEach((row,s)=>{
+    const c = colFor(chartNames[s], s);
+    g += `<polyline points="${row.map((v,i)=>`${x(i)},${y(v)}`).join(" ")}" fill="none" stroke="${c}" stroke-width="2"/>`});
+  // end-of-line labels, pushed apart so close series don't overlap
+  const labels = chartData.map((row,s)=>({s, v: row[59], ly: y(row[59])+4}))
+                          .sort((a,b)=>a.ly-b.ly);
+  for (let i=1;i<labels.length;i++)
+    if (labels[i].ly - labels[i-1].ly < 14) labels[i].ly = labels[i-1].ly + 14;
+  for (let i=labels.length-1;i>=0;i--){
+    if (labels[i].ly > H-B-2) labels[i].ly = H-B-2;
+    if (i<labels.length-1 && labels[i+1].ly - labels[i].ly < 14) labels[i].ly = labels[i+1].ly - 14;
+  }
+  labels.forEach(l=>{
+    g += `<text x="${W-R+10}" y="${l.ly}" fill="${colFor(chartNames[l.s], l.s)}" font-size="12">${fmtRate(l.v)}</text>`});
+  g += `<line id="xh" x1="0" y1="${T}" x2="0" y2="${H-B}" stroke="var(--ink-mut)" opacity="0"/>`;
+  svg.innerHTML = g;
+  // on narrow screens the chart scrolls: keep it pinned to "now" (the right edge)
+  // unless the user deliberately scrolled back into the past
+  const box = svg.parentElement;
+  if (box.scrollWidth > box.clientWidth){
+    const nearRight = box.scrollLeft + box.clientWidth >= box.scrollWidth - 60;
+    if (!drawChart.scrolled || nearRight) box.scrollLeft = box.scrollWidth;
+    drawChart.scrolled = true;
+  }
+}
+svg.addEventListener("mousemove", ev=>{
+  if (!chartData.length) return;
+  const r = svg.getBoundingClientRect(), px = (ev.clientX-r.left)/r.width*W;
+  const i = Math.round((px-L)/(W-L-R)*59); if (i<0||i>59){ tip.style.display="none"; return; }
+  const xh = svg.querySelector("#xh"), xi = L+(W-L-R)*i/59;
+  xh.setAttribute("x1",xi); xh.setAttribute("x2",xi); xh.setAttribute("opacity",.6);
+  tip.style.display = "block";
+  tip.style.left = Math.min(ev.clientX-r.left+14, r.width-170)+"px"; tip.style.top = "12px";
+  tip.innerHTML = `<span style="color:var(--ink-dim)">${59-i} min ago</span><br>` +
+    chartData.map((row,s)=>`<span style="color:${colFor(chartNames[s],s)}">■</span> ${chartNames[s]}: <b>${fmtRate(row[i])}</b>`).join("<br>");
+});
+function hideTip(){ tip.style.display="none";
+  svg.querySelector("#xh")?.setAttribute("opacity",0); }
+svg.addEventListener("mouseleave", hideTip);
+// touch screens have no "mouse leave" — hide the tooltip shortly after the tap
+svg.addEventListener("touchend", ()=>setTimeout(hideTip, 2000));
+document.addEventListener("touchstart", e=>{ if (!svg.contains(e.target)) hideTip(); });
+
+/* ============ LIVE CHAIN (mempool.space) ============ */
+let blockH = null, lastBlockTs = null;
+async function fetchChain(){
+  try{
+    const r = await fetch("https://mempool.space/api/v1/blocks"); const arr = await r.json();
+    const tipB = arr[0];
+    const winner = tipB.extras && tipB.extras.pool ? tipB.extras.pool.name : null;
+    if (blockH !== null && tipB.height > blockH) strike(tipB.height, winner);
+    blockH = tipB.height; lastBlockTs = tipB.timestamp*1000;
+    document.getElementById("blockH").textContent = blockH.toLocaleString("en-US");
+    document.getElementById("fuseBlock").textContent = blockH.toLocaleString("en-US");
+    if (winner) document.getElementById("lastWinner").textContent = winner;
+    if (tipB.difficulty){ NET_DIFF = tipB.difficulty; LOG_MAX = Math.log10(NET_DIFF);
+      document.getElementById("netDiffLbl").textContent = fmtDiff(NET_DIFF)+" = BLOCK"; }
+  }catch(e){ document.getElementById("fuseNote").textContent = "⚠ chain unreachable (offline?)"; }
+}
+function fuseTick(){
+  if (!lastBlockTs) return;
+  const age = Math.max(0, (Date.now()-lastBlockTs)/1000), p = Math.min(1, age/600);
+  document.getElementById("fuseLine").style.width = ((1-p)*100)+"%";
+  document.getElementById("fuseBurned").style.width = (p*100)+"%";
+  document.getElementById("spark").style.left = (Math.min(p,.99)*100)+"%";
+  const m = age/60|0, s = age%60|0;
+  document.getElementById("fuseAge").textContent = `${m}:${String(s).padStart(2,"0")} min`;
+  const note = document.getElementById("fuseNote");
+  if (age > 600){ note.textContent = "⏰ running late — the block can land ANY second!"; note.className = "fuse-late"; }
+  else { note.textContent = "average block time: ~10 min"; note.className = ""; }
+}
+
+/* ============ LIVE PRICE (CoinGecko, USD) ============ */
+async function fetchPrice(){
+  try{
+    const r = await fetch("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd&include_24hr_change=true");
+    const j = await r.json(); const p = j.bitcoin.usd, ch = j.bitcoin.usd_24h_change, up = ch>=0;
+    document.getElementById("tPrice").innerHTML =
+      `$${Math.round(p).toLocaleString("en-US")} <span class="${up?"up":"down"}">${up?"▲":"▼"}</span>`;
+    document.getElementById("tPriceSub").innerHTML =
+      `24 h: <span class="${up?"up":"down"}">${up?"+":""}${fmt(ch,1)} %</span>`;
+    document.getElementById("jackUsd").textContent =
+      "≈ $" + Math.round(3.125*p).toLocaleString("en-US") + " at the current price";
+  }catch(e){ document.getElementById("tPriceSub").textContent = "⚠ price unreachable (offline?)"; }
+}
+
+/* ============ BROWSER PLAYER — hashing right here in the page ============
+   Double SHA-256 of the 80-byte header. The first 64 bytes are constant per job,
+   so we precompute their midstate and only compress the tail block per nonce. */
+const K = new Uint32Array([
+  0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
+  0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
+  0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
+  0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
+  0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
+  0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+  0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
+  0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2]);
+const IV = new Uint32Array([0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,
+                            0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19]);
+const HW = new Uint32Array(64);                // scratch message schedule (W is taken by the chart)
+function compress(h, w){                       // one SHA-256 block, h updated in place
+  for (let i=16;i<64;i++){
+    const a=w[i-15], b=w[i-2];
+    const s0=((a>>>7)|(a<<25))^((a>>>18)|(a<<14))^(a>>>3);
+    const s1=((b>>>17)|(b<<15))^((b>>>19)|(b<<13))^(b>>>10);
+    w[i]=(w[i-16]+s0+w[i-7]+s1)|0;
+  }
+  let a=h[0],b=h[1],c=h[2],d=h[3],e=h[4],f=h[5],g=h[6],hh=h[7];
+  for (let i=0;i<64;i++){
+    const S1=((e>>>6)|(e<<26))^((e>>>11)|(e<<21))^((e>>>25)|(e<<7));
+    const ch=(e&f)^(~e&g);
+    const t1=(hh+S1+ch+K[i]+w[i])|0;
+    const S0=((a>>>2)|(a<<30))^((a>>>13)|(a<<19))^((a>>>22)|(a<<10));
+    const maj=(a&b)^(a&c)^(b&c);
+    const t2=(S0+maj)|0;
+    hh=g; g=f; f=e; e=(d+t1)|0; d=c; c=b; b=a; a=(t1+t2)|0;
+  }
+  h[0]=(h[0]+a)|0; h[1]=(h[1]+b)|0; h[2]=(h[2]+c)|0; h[3]=(h[3]+d)|0;
+  h[4]=(h[4]+e)|0; h[5]=(h[5]+f)|0; h[6]=(h[6]+g)|0; h[7]=(h[7]+hh)|0;
+}
+const PLAY = { on:false, job:null, nonce:0, end:0, hashes:0, sent:0, lock:null,
+               client:"c"+Math.random().toString(36).slice(2,10)+Date.now().toString(36),
+               mid:new Uint32Array(8), tail:new Uint32Array(4), tgt:new Uint32Array(8),
+               h1:new Uint32Array(8), h2:new Uint32Array(8), rate:0, lastT:0, lastH:0 };
+
+function deviceName(){
+  const ua = navigator.userAgent;
+  if (/Android/i.test(ua)) return "Android";
+  if (/iPhone|iPad|iPod/i.test(ua)) return "iOS";
+  if (/Mac/i.test(ua)) return "Mac";
+  if (/Linux/i.test(ua)) return "Linux";
+  if (/Windows/i.test(ua)) return "Windows";
+  return "device";
+}
+function loadJob(j){
+  const hdr = j.header;                                   // 76 bytes hex
+  PLAY.mid.set(IV);
+  const w = new Uint32Array(64);
+  for (let i=0;i<16;i++) w[i] = parseInt(hdr.substr(i*8,8),16)|0;   // first 64 bytes
+  compress(PLAY.mid, w);
+  for (let i=0;i<3;i++) PLAY.tail[i] = parseInt(hdr.substr(128+i*8,8),16)|0;  // last 12 bytes
+  for (let i=0;i<8;i++) PLAY.tgt[i] = parseInt(j.target.substr(i*8,8),16)>>>0;
+  PLAY.job = j.uid; PLAY.nonce = j.start>>>0; PLAY.end = (j.start + j.count)>>>0;
+}
+function hashBatch(n){
+  const w = HW, h1 = PLAY.h1, h2 = PLAY.h2;
+  let found = -1;
+  for (let k=0;k<n;k++){
+    const nonce = PLAY.nonce>>>0;
+    // block 2 of the header: 12 bytes tail + nonce + padding, length = 640 bits
+    w[0]=PLAY.tail[0]; w[1]=PLAY.tail[1]; w[2]=PLAY.tail[2];
+    w[3]=((nonce&0xff)<<24)|((nonce&0xff00)<<8)|((nonce>>>8)&0xff00)|((nonce>>>24)&0xff);
+    w[4]=0x80000000; w[5]=0;w[6]=0;w[7]=0;w[8]=0;w[9]=0;w[10]=0;w[11]=0;w[12]=0;w[13]=0;w[14]=0;
+    w[15]=640;
+    h1.set(PLAY.mid); compress(h1, w);
+    // second SHA-256 over the 32-byte digest
+    for (let i=0;i<8;i++) w[i]=h1[i];
+    w[8]=0x80000000; w[9]=0;w[10]=0;w[11]=0;w[12]=0;w[13]=0;w[14]=0; w[15]=256;
+    h2.set(IV); compress(h2, w);
+    if (h2[7] === 0){                                   // fast filter: top LE word must be 0
+      let ok = true;
+      for (let i=0;i<8;i++){
+        const v = ((h2[7-i]>>>24)|((h2[7-i]>>>8)&0xff00)|((h2[7-i]&0xff00)<<8)|(h2[7-i]<<24))>>>0;
+        if (v < PLAY.tgt[i]) break;
+        if (v > PLAY.tgt[i]){ ok = false; break; }
+      }
+      if (ok) found = nonce;
+    }
+    PLAY.nonce = (PLAY.nonce + 1)>>>0;
+    if (found >= 0) { PLAY.hashes += k+1; return found; }
+  }
+  PLAY.hashes += n;
+  return -1;
+}
+async function playLoop(){
+  if (!PLAY.on) return;
+  try{
+    if (PLAY.job === null || PLAY.nonce >= PLAY.end){
+      const r = await fetch(`${API}/work?client=${PLAY.client}&name=${encodeURIComponent(deviceName())}`,
+                            {cache:"no-store"});
+      const j = await r.json();
+      if (j.wait){ setTimeout(playLoop, 2000); return; }
+      loadJob(j);
+    }
+    const t0 = performance.now();
+    const found = hashBatch(4000);
+    const dt = performance.now() - t0;
+    if (found >= 0){
+      report(found);
+      log(`🎟 your device found a "ticket" — sending it to the pool`, "gx");
+    }
+    const now = Date.now();
+    if (now - PLAY.lastT > 3000){                        // report progress every 3 s
+      PLAY.rate = (PLAY.hashes - PLAY.lastH) / ((now - PLAY.lastT)/1000);
+      PLAY.lastT = now; PLAY.lastH = PLAY.hashes;
+      report(null);
+      document.getElementById("playRate").textContent =
+        `your device: ${fmtRate(PLAY.rate)} · ${PLAY.hashes.toLocaleString("en-US")} "tickets" tried`;
+    }
+    setTimeout(playLoop, dt > 60 ? 0 : 1);               // yield so the page stays smooth
+  }catch(e){
+    document.getElementById("playState").textContent = "miner unreachable — retrying…";
+    setTimeout(playLoop, 3000);
+  }
+}
+async function report(nonce){
+  const body = JSON.stringify({client:PLAY.client, uid:PLAY.job,
+    hashes:PLAY.hashes - PLAY.sent, nonce:nonce});
+  PLAY.sent = PLAY.hashes;
+  try{ await fetch(API + "/submit", {method:"POST", body, headers:{"Content-Type":"text/plain"}}); }
+  catch(e){}
+}
+async function keepAwake(on){
+  // while playing, ask the device to keep its screen on — a locked screen
+  // pauses the browser and the game with it
+  try{
+    if (on && "wakeLock" in navigator){
+      PLAY.lock = await navigator.wakeLock.request("screen");
+    } else if (!on && PLAY.lock){
+      await PLAY.lock.release(); PLAY.lock = null;
+    }
+  }catch(e){ PLAY.lock = null; }
+}
+document.addEventListener("visibilitychange", ()=>{
+  if (PLAY.on && document.visibilityState === "visible") keepAwake(true);
+});
+
+document.getElementById("playBtn").addEventListener("click", ()=>{
+  const btn = document.getElementById("playBtn");
+  PLAY.on = !PLAY.on;
+  if (PLAY.on){
+    btn.textContent = "■ STOP"; btn.style.color = "var(--amber)"; btn.style.borderColor = "var(--amber)";
+    document.getElementById("playState").textContent =
+      "you are IN THE GAME — this device is hashing (screen stays awake; locking it pauses the game)";
+    PLAY.lastT = Date.now(); PLAY.lastH = PLAY.hashes; PLAY.job = null;
+    keepAwake(true);
+    log("▶ this device joined the game", "okx");
+    playLoop();
+  } else {
+    btn.textContent = "▶ PLAY"; btn.style.color = "var(--hero)"; btn.style.borderColor = "var(--hero)";
+    document.getElementById("playState").textContent = "stopped — press PLAY to draw \"tickets\" again";
+    keepAwake(false);
+    log("■ this device left the game");
+  }
+});
+
+/* ============ DONATION COPY BUTTON ============ */
+// on the mining PC itself (file:// or localhost) PLAY is pointless — say so up front
+if (location.protocol === "file:" || /^(localhost|127\.)/.test(location.hostname))
+  document.getElementById("playHint").style.display = "block";
+
+document.getElementById("copyBtn").addEventListener("click", async ()=>{
+  const addr = document.getElementById("donAddr").textContent.trim();
+  const btn = document.getElementById("copyBtn");
+  let ok = false;
+  try{ await navigator.clipboard.writeText(addr); ok = true; }
+  catch(e){
+    const ta = document.createElement("textarea");            // fallback for older setups
+    ta.value = addr; document.body.appendChild(ta); ta.select();
+    try{ ok = document.execCommand("copy"); }catch(_){}
+    ta.remove();
+  }
+  btn.textContent = ok ? "✓ COPIED" : "select & copy manually";
+  setTimeout(()=>{ btn.innerHTML = "&#10064; COPY"; }, 2200);
+});
+
+fetchStats(); setInterval(fetchStats, 2000);
+fetchChain(); setInterval(fetchChain, 30000);
+fetchPrice(); setInterval(fetchPrice, 60000);
+setInterval(fuseTick, 1000);
+</script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+{
+  "btc_address": "",
+  "worker_name": "sticks",
+  "pool_host": "public-pool.io",
+  "pool_port": 21496,
+  "dashboard_port": 8888,
+  "suggest_difficulty": 256,
+  "cpu_mining": true,
+  "cpu_workers": 0,
+  "cpu_suggest_difficulty": 1,
+  "browser_mining": true
+}

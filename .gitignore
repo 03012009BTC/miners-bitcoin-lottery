@@ -1,0 +1,13 @@
+# personal / machine-specific files — never publish these
+config.json
+lottery_best.json
+miner.log
+__pycache__/
+*.pyc
+
+# local design draft and project-internal notes
+dashboard_navrh.html
+CLAUDE.md
+ZADANIE.md
+.claude/
+config.backup.json
