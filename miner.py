@@ -22,6 +22,7 @@ import socket
 import struct
 import threading
 import time
+from collections import deque
 from hashlib import sha256
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -411,6 +412,11 @@ def bf1_packet(header76: bytes) -> bytes:
     return b"W" + midstate + tail
 
 
+# cgminer's BF1WAIT: the chip needs ~1.6 s for a full nonce-range scan; feeding
+# it faster truncates scans (measured live: at a 0.8 s pace most jobs found nothing)
+BF1_JOB_SECONDS = 1.6
+
+
 def find_bf1_ports() -> list[str]:
     return [p.device for p in list_ports.comports() if (p.vid, p.pid) == BF1_VIDPID]
 
@@ -432,13 +438,16 @@ class Stick:
         self.last_job_t = 0.0
         self.last_frame_t = time.time()
         self.reset_sent = False
-        self.diff1_hits = 0
+        self.hits = deque()      # timestamps of unique diff-1 hits (rolling window)
         self.shares = 0
         self.start = time.time()
 
     def hs(self) -> float:
-        """Effective hashrate (H/s) estimated from real diff-1 hits (not from the job pace)."""
-        return self.diff1_hits * 2**32 / max(1.0, time.time() - self.start)
+        """Effective hashrate (H/s) from unique diff-1 hits over the last 15 minutes."""
+        now = time.time()
+        while self.hits and now - self.hits[0] > 900:
+            self.hits.popleft()
+        return len(self.hits) * 2**32 / max(1.0, min(now - self.start, 900.0))
 
     def close(self) -> None:
         try:
@@ -688,8 +697,8 @@ def run_session(rig: CpuRig | None) -> None:
             # 3) serve each stick
             for port, stick in list(sticks.items()):
                 try:
-                    # a fresh job (every ~1.4 s, or after a reset / new block)
-                    if stick.send_next or time.time() - stick.last_job_t > 1.4:
+                    # a fresh job (every ~1.6 s, or after a reset / new block)
+                    if stick.send_next or time.time() - stick.last_job_t > BF1_JOB_SECONDS:
                         header76, en2, ntime = build_work(st, extranonce2)
                         extranonce2 += 1
                         stick.s.write(bf1_packet(header76))
@@ -734,11 +743,11 @@ def run_session(rig: CpuRig | None) -> None:
                                 h_int = int.from_bytes(h, "little")
                                 if h_int <= DIFF1_TARGET:
                                     hit = True
-                                    stick.diff1_hits += 1
-                                    key = (job_id, n)
+                                    key = (en2, n)
                                     if key in seen:
-                                        continue
+                                        continue    # chip repeats result frames — count each hit once
                                     seen.add(key)
+                                    stick.hits.append(time.time())
                                     if h_int <= target:
                                         st.send("mining.submit",
                                                 [WORKER, job_id, en2, ntime, f"{n:08x}"])
