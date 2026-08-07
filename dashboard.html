@@ -343,7 +343,8 @@ let NET_DIFF = 126.23e12, LOG_MAX = Math.log10(NET_DIFF);
 const COLS = ["#1ea452", "#2790c4", "#b57a00"];
 const CPU_COL = "#8a8a8a";
 // color follows the device, not its position: sticks take the fixed palette, the CPU is always grey
-const colFor = (name, i) => name.startsWith("CPU") ? CPU_COL : COLS[i % COLS.length];
+const colFor = (name, i) => name.startsWith("CPU") ? CPU_COL
+  : name.startsWith("Jalapeno") ? "#b57a00" : COLS[i % COLS.length];
 const fmt = (x, d=2) => x.toLocaleString("en-US", {minimumFractionDigits:d, maximumFractionDigits:d});
 const fmtRate = hs => hs>=1e9 ? fmt(hs/1e9,2)+" GH/s" : hs>=1e6 ? fmt(hs/1e6,2)+" MH/s" :
                       hs>=1e3 ? fmt(hs/1e3,1)+" kH/s" : fmt(hs,0)+" H/s";
@@ -433,7 +434,7 @@ function render(st){
   const tb = document.getElementById("fleetBody");
   tb.innerHTML = st.devices.map((d,i)=>`<tr>
       <td><span class="chip" style="background:${colFor(d.name,i)}"></span>${d.name}</td>
-      <td>${d.port}</td><td class="st-ok">● in the game</td>
+      <td>${d.port}</td><td class="st-ok">● in the game${d.temp ? ` · ${d.temp} °C` : ""}</td>
       <td class="num">${fmtRate(d.hs)}</td><td class="num">${d.shares}</td></tr>`).join("")
     || `<tr><td colspan="5" class="st-err">no machine connected — plug a stick in (or enable cpu_mining in config.json)</td></tr>`;
   document.getElementById("legend").innerHTML = st.devices.map((d,i)=>

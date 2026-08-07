@@ -17,7 +17,7 @@ can't read (see the warning below).
 | Device | Chip / protocol | Speed | Status |
 |---|---|---|---|
 | Blue Fury / Red Fury (BF1) | Bitfury, binary protocol | ~2.6 GH/s | ✅ mining, multi-stick + hotplug |
-| Butterfly Labs Jalapeño (BFLSC) | 2× BFL SC, text protocol | ~5–6.8 GH/s | ✅ verified, miner support coming |
+| Butterfly Labs Jalapeño (BFLSC) | 2× BFL SC, text protocol | ~4.5–5.3 GH/s | ✅ mining, hotplug, temp watch |
 | Bi•Fury (BXF) | 2× Bitfury, text protocol | ~5 GH/s | identification branch only |
 
 ## Quick start (Windows)
@@ -127,7 +127,7 @@ Windows then binds the stock `usbser` driver and a COM port appears.
 
 | File | Purpose |
 |---|---|
-| `miner.py` | the miner: Stratum V1 client, BF1 driver, CPU + browser mining, watchdog, dashboard server |
+| `miner.py` | the miner: Stratum V1 client, BF1 + BFLSC (Jalapeño) drivers, CPU + browser mining, watchdog, dashboard server |
 | `bitfury.py` | BF1 protocol core: SHA-256 midstate, decnonce, block-125552 self-test |
 | `jalapeno_test.py` | BFLSC (Jalapeño) known-block self-test |
 | `identify.py` | identify connected sticks |

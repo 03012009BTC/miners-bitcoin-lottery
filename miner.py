@@ -421,6 +421,14 @@ def find_bf1_ports() -> list[str]:
     return [p.device for p in list_ports.comports() if (p.vid, p.pid) == BF1_VIDPID]
 
 
+def rolling_hs(hits: deque, start: float) -> float:
+    """Effective hashrate (H/s) from unique diff-1 hits over the last 15 minutes."""
+    now = time.time()
+    while hits and now - hits[0] > 900:
+        hits.popleft()
+    return len(hits) * 2**32 / max(1.0, min(now - start, 900.0))
+
+
 class Stick:
     """One connected Blue Fury: serial port, jobs in flight, counters."""
 
@@ -443,17 +451,189 @@ class Stick:
         self.start = time.time()
 
     def hs(self) -> float:
-        """Effective hashrate (H/s) from unique diff-1 hits over the last 15 minutes."""
-        now = time.time()
-        while self.hits and now - self.hits[0] > 900:
-            self.hits.popleft()
-        return len(self.hits) * 2**32 / max(1.0, min(now - self.start, 900.0))
+        return rolling_hs(self.hits, self.start)
 
     def close(self) -> None:
         try:
             self.s.close()
         except (OSError, serial.SerialException):
             pass
+
+
+# ---------------------------- Butterfly Labs Jalapeno (BFLSC) ----------------------------
+# Text protocol per cgminer driver-bflsc.c/h: ZGX identity, ZNX -> "OK" -> 46-byte
+# job [45|midstate 32|header tail 12|0xAA] -> "OK:QUEUED", ZOX result poll, ZQX queue
+# flush, ZLX temperature. The device queues up to 20 jobs and scans the FULL nonce
+# range of each, reporting every diff-1 nonce it finds.
+BFL_VIDPID = (0x0403, 0x6014)      # FTDI bridge on BitForce SC devices
+BFL_QUEUE_TARGET = 5               # jobs we keep queued on the device (max 20; deeper = staler shares)
+BFL_TEMP_PAUSE = 80                # deg C: stop feeding above this, resume 5 below
+
+
+def _bswap32(n: int) -> int:
+    return struct.unpack("<I", struct.pack(">I", n))[0]
+
+
+class Jalapeno:
+    """One BitForce SC device. A dedicated thread speaks the (slow, line-based)
+    serial protocol so the main loop never blocks on it: the loop only feeds
+    prepared work into work_q and drains nonce candidates from out_q."""
+
+    def __init__(self, port: str) -> None:
+        self.port = port
+        self.s = serial.Serial(port, 115200, timeout=1, write_timeout=2)
+        # unjam a half-finished binary job upload (e.g. after a hard kill): pad it
+        # to completion with zeros, let the device spit its error, then start clean
+        self.s.write(bytes(64))
+        time.sleep(0.3)
+        self.s.reset_input_buffer()
+        self.s.write(b"ZGX")
+        identity = self.s.readline().decode("ascii", "replace").strip()
+        if "SHA256" not in identity.upper():
+            self.s.close()
+            raise ValueError(f"{port} is not a BitForce SC device ({identity!r})")
+        self.s.write(b"ZQX")               # empty any leftover device queue
+        self.s.readline()
+        self.name = f"Jalapeno ({port})"
+        self.work_q: queue.Queue = queue.Queue()   # (en2, header76, ntime, job_id)
+        self.out_q: queue.Queue = queue.Queue()    # (en2, header76, ntime, job_id, nonce)
+        self.jobs: dict[str, tuple] = {}           # midstate hex -> work item in device queue
+        self.queued = 0                            # our estimate of the device queue depth
+        self.temp: int | None = None               # hotter of the two board sensors (deg C)
+        self.hot = False
+        self.hits = deque()
+        self.shares = 0
+        self.start = time.time()
+        self.alive = True
+        self.flush = False                         # new block: empty the device queue
+        self._shutdown = False
+        self._last_result_t = time.time()
+        self._last_temp_t = 0.0
+        self._last_poll_t = 0.0
+        threading.Thread(target=self._run, daemon=True).start()
+
+    def hs(self) -> float:
+        return rolling_hs(self.hits, self.start)
+
+    def close(self) -> None:
+        self._shutdown = True
+        try:
+            self.s.close()
+        except (OSError, serial.SerialException):
+            pass
+
+    # --- everything below runs in the device thread ---
+    def _line(self) -> str:
+        return self.s.readline().decode("ascii", "replace").strip()
+
+    def _queue_job(self, item: tuple) -> bool:
+        _en2, header76, _ntime, _job_id = item
+        midstate = struct.pack("<8I", *sha256_midstate(header76[:64]))
+        tail = b"".join(header76[i:i + 4][::-1] for i in range(64, 76, 4))
+        self.s.write(b"ZNX")
+        if "OK" not in self._line():
+            return False
+        self.s.write(bytes([45]) + midstate + tail + bytes([0xAA]))
+        reply = self._line()                       # "OK:QUEUED n" or "ERR:QUEUE FULL"
+        if "QUEUED" in reply:
+            self.jobs[midstate.hex()] = item
+            while len(self.jobs) > 40:             # drop the oldest if results went missing
+                del self.jobs[next(iter(self.jobs))]
+            self.queued += 1
+            return True
+        if "FULL" in reply:
+            self.queued = 20                       # decays as result lines come back
+        return False
+
+    def _poll_results(self) -> None:
+        self.s.write(b"ZOX")
+        lines = []
+        while True:
+            line = self._line()
+            if not line or line == "OK":
+                break
+            lines.append(line)
+        for line in lines:
+            # NOTE: "INPROCESS:n" is how many jobs are being HASHED right now (1),
+            # NOT the queue depth — we track the depth ourselves (measured live;
+            # trusting INPROCESS made us hammer a full queue with ZNX retries)
+            if line.startswith(("INPROCESS", "COUNT")):
+                continue
+            fields = [f.strip() for f in line.split(",")]
+            if len(fields) < 3 or len(fields[0]) != 64:
+                continue                           # not a result line
+            self._last_result_t = time.time()
+            item = self.jobs.pop(fields[0].lower(), None)
+            self.queued = max(0, self.queued - 1)
+            if item is None:
+                continue                           # job was flushed / unknown
+            en2, header76, ntime, job_id = item
+            for f in fields[2:]:
+                if len(f) == 8:
+                    try:
+                        raw = int(f, 16)
+                    except ValueError:
+                        continue
+                    # the nonce hex is in raw header byte order -> swap for the RPC value
+                    self.out_q.put((en2, header76, ntime, job_id, _bswap32(raw)))
+
+    def _read_temp(self) -> None:
+        self.s.write(b"ZLX")
+        line = self._line()                        # e.g. "Temp1: 43, Temp2: 45"
+        vals = []
+        for part in line.replace(",", " ").split():
+            tail = part.split(":")[-1]
+            if tail.isdigit():
+                vals.append(int(tail))
+        if vals:
+            self.temp = max(vals)
+            if self.temp >= BFL_TEMP_PAUSE and not self.hot:
+                self.hot = True
+                print(f"[!] {self.name} is hot ({self.temp} degC) — pausing work until it cools")
+            elif self.hot and self.temp <= BFL_TEMP_PAUSE - 5:
+                self.hot = False
+                print(f"[ok] {self.name} cooled down ({self.temp} degC) — resuming")
+
+    def _run(self) -> None:
+        try:
+            while not self._shutdown:
+                if self.flush:
+                    self.flush = False
+                    try:                           # drop work prepared for the old block
+                        while True:
+                            self.work_q.get_nowait()
+                    except queue.Empty:
+                        pass
+                    self.s.write(b"ZQX")
+                    self._line()
+                    self.jobs.clear()
+                    self.queued = 0
+                while not self.hot and self.queued < BFL_QUEUE_TARGET:
+                    try:
+                        item = self.work_q.get_nowait()
+                    except queue.Empty:
+                        break
+                    if not self._queue_job(item):
+                        self.work_q.put(item)      # keep the work for the next free slot
+                        break
+                # polling too often disturbs the device mid-scan (it loses valid
+                # nonces!) — cgminer waits ~954 ms per job (BAJ_WORK_TIME), so do we
+                if time.time() - self._last_poll_t >= 1.0:
+                    self._last_poll_t = time.time()
+                    self._poll_results()
+                if time.time() - self._last_temp_t > 30:
+                    self._last_temp_t = time.time()
+                    self._read_temp()
+                if time.time() - self._last_result_t > 60:
+                    raise serial.SerialException("no results for 60 s")
+                time.sleep(0.1)
+        except (OSError, serial.SerialException):
+            pass
+        self.alive = False
+
+
+def find_bfl_ports() -> list[str]:
+    return [p.device for p in list_ports.comports() if (p.vid, p.pid) == BFL_VIDPID]
 
 
 # ---------------------------- CPU mining ----------------------------
@@ -557,6 +737,8 @@ def run_session(rig: CpuRig | None) -> None:
     accepted = rejected = 0
     seen: set[tuple[str, int]] = set()
     sticks: dict[str, Stick] = {}
+    jals: dict[str, Jalapeno] = {}
+    bfl_bad: set[str] = set()   # FTDI ports that answered ZGX with something else
     last_scan = 0.0
     last_status = time.time()
     last_job = st.job["job_id"]
@@ -602,6 +784,9 @@ def run_session(rig: CpuRig | None) -> None:
             if st.clean or st.job["job_id"] != last_job:
                 for stick in sticks.values():
                     stick.send_next = True
+                if st.clean:
+                    for jal in jals.values():
+                        jal.flush = True   # old block's jobs are worthless now
                 last_job = st.job["job_id"]
                 st.clean = False
 
@@ -676,7 +861,7 @@ def run_session(rig: CpuRig | None) -> None:
                 except queue.Empty:
                     pass
 
-            # 2) hotplug: every 5 s look for newly plugged sticks
+            # 2) hotplug: every 5 s look for newly plugged devices
             if time.time() - last_scan > 5:
                 last_scan = time.time()
                 for port in find_bf1_ports():
@@ -687,11 +872,24 @@ def run_session(rig: CpuRig | None) -> None:
                             warned_empty = False
                         except (OSError, serial.SerialException):
                             pass  # port not ready yet — retry on the next scan
-                if not sticks and not warned_empty:
+                bfl_present = find_bfl_ports()
+                bfl_bad.intersection_update(bfl_present)   # unplugged -> forget the verdict
+                for port in bfl_present:
+                    if port not in jals and port not in bfl_bad:
+                        try:
+                            jals[port] = Jalapeno(port)
+                            print(f"[+] {jals[port].name} joined the game")
+                            warned_empty = False
+                        except ValueError as e:
+                            print(f"[?] {e} — ignoring this port")
+                            bfl_bad.add(port)
+                        except (OSError, serial.SerialException):
+                            pass
+                if not sticks and not jals and not warned_empty:
                     if rig is None:
-                        print("No Blue Fury connected — plug a stick in, it will join automatically.")
+                        print("No miner connected — plug a Blue Fury or a Jalapeno in, it will join automatically.")
                     else:
-                        print("No Blue Fury connected — the CPU keeps playing; a stick joins automatically when plugged.")
+                        print("No miner connected — the CPU keeps playing; a device joins automatically when plugged.")
                     warned_empty = True
 
             # 3) serve each stick
@@ -764,11 +962,48 @@ def run_session(rig: CpuRig | None) -> None:
                     stick.close()
                     del sticks[port]
 
+            # 3b) serve each Jalapeno: keep its thread fed, collect its candidates
+            for port, jal in list(jals.items()):
+                if not jal.alive:
+                    print(f"[-] {jal.name} lost — check power & USB, it rejoins automatically")
+                    jal.close()
+                    del jals[port]
+                    continue
+                while jal.work_q.qsize() < 6:
+                    header76, en2, ntime = build_work(st, extranonce2)
+                    extranonce2 += 1
+                    jal.work_q.put((en2, header76, ntime, last_job))
+                try:
+                    while True:
+                        en2, header76, ntime, job_id, n = jal.out_q.get_nowait()
+                        key = (en2, n)
+                        if key in seen:
+                            continue    # device may repeat results — count each once
+                        h = dsha(header76 + struct.pack("<I", n))
+                        h_int = int.from_bytes(h, "little")
+                        if h_int > DIFF1_TARGET:
+                            continue    # noise / hardware error, not a real find
+                        seen.add(key)
+                        jal.hits.append(time.time())
+                        if h_int <= target:
+                            st.send("mining.submit",
+                                    [WORKER, job_id, en2, ntime, f"{n:08x}"])
+                            jal.shares += 1
+                            print(f"[share] nonce {n:#010x} sent to pool "
+                                  f"({jal.name}, hash ...{h[::-1].hex()[:16]})")
+                            record_ticket(DIFF1_TARGET / h_int, n, jal.name)
+                except queue.Empty:
+                    pass
+
             # 4) dashboard stats + a status line once per minute
             STATS["pool"]["difficulty"] = st.difficulty
             devices = [
                 {"name": v.name, "port": v.port, "hs": round(v.hs(), 1), "shares": v.shares}
                 for v in sticks.values()
+            ] + [
+                {"name": v.name, "port": v.port, "hs": round(v.hs(), 1),
+                 "shares": v.shares, "temp": v.temp}
+                for v in jals.values()
             ]
             if rig is not None:
                 devices.append({"name": rig.name, "port": "—",
@@ -782,6 +1017,7 @@ def run_session(rig: CpuRig | None) -> None:
                 last_status = time.time()
                 total = sum(d["hs"] for d in devices)
                 print(f"[status] sticks: {len(sticks)}"
+                      + (f" + {len(jals)} Jalapeno" if jals else "")
                       + (f" + {rig.name}" if rig is not None else "")
                       + f", ~{total / 1e9:.3f} GH/s total, "
                         f"accepted: {accepted}, rejected: {rejected}, diff: {st.difficulty}")
@@ -790,6 +1026,8 @@ def run_session(rig: CpuRig | None) -> None:
     finally:
         for stick in sticks.values():
             stick.close()
+        for jal in jals.values():
+            jal.close()
         with WEB_LOCK:
             WEB["job"] = None      # browsers wait until the new session hands out work
 
