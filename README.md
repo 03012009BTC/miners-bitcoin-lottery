@@ -120,8 +120,11 @@ Windows then binds the stock `usbser` driver and a COM port appears.
   with **per-port switches** is a luxury worth having.
 - The Jalapeño needs its own 12 V / ≥5 A PSU (barrel 5.5/2.5 mm, center-positive).
   Never feed it 13 V "close enough" adapters.
-- Laptops may suspend USB to save power and silently kill the stick — disable
-  USB selective suspend if you mine on one.
+- Laptops suspend USB to save power, which silently kills a stick until you
+  replug it. Run `NOTEBOOK_FIX_USB.bat` as Administrator once (it disables USB
+  selective suspend, stops Windows powering down USB hubs, and keeps the machine
+  awake with the lid closed), then reboot. Every change it makes is reversible —
+  the undo commands are in the file.
 
 ## Files
 
@@ -133,6 +136,7 @@ Windows then binds the stock `usbser` driver and a COM port appears.
 | `identify.py` | identify connected sticks |
 | `dashboard.html` | the Bitcoin Lottery dashboard (works double-clicked or served at `:8888`) |
 | `START_MINING.bat` | double-click launcher (logs to `miner.log`) |
+| `NOTEBOOK_FIX_USB.bat` | one-off laptop fix: stop Windows suspending your USB miners |
 | `lottery_best.json` | your best "ticket" ever (persistent) |
 
 ## License
