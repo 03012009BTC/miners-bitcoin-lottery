@@ -800,8 +800,12 @@ def run_session(rig: CpuRig | None) -> None:
                 for stick in sticks.values():
                     stick.send_next = True
                 if st.clean:
+                    # clean_jobs means the block changed: everything in flight is
+                    # worthless now, and submitting it only earns "stale share"
+                    for stick in sticks.values():
+                        stick.in_flight.clear()
                     for jal in jals.values():
-                        jal.flush = True   # old block's jobs are worthless now
+                        jal.flush = True
                 last_job = st.job["job_id"]
                 st.clean = False
 
