@@ -119,6 +119,9 @@ def _lan_ip() -> str:
         return ""
 
 
+# the miner thread writes STATS, the dashboard threads read it — serialising a
+# dict while another thread edits it can raise or hand out a half-built list
+STATS_LOCK = threading.Lock()
 STATS = {
     "start": time.time(),
     "lan": _lan_ip(), "port": DASHBOARD_PORT,
@@ -241,7 +244,9 @@ class _DashHandler(BaseHTTPRequestHandler):
             self._send(json.dumps(_web_work(self.path)).encode(), "application/json")
             return
         if path == "/stats.json":
-            body, ctype = json.dumps(STATS).encode(), "application/json"
+            with STATS_LOCK:
+                body = json.dumps(STATS).encode()
+            ctype = "application/json"
         elif path == "/icon.svg":
             body, ctype = ICON_SVG, "image/svg+xml"
         elif path == "/manifest.json":
@@ -746,16 +751,19 @@ def run_session(rig: CpuRig | None) -> None:
 
     def record_ticket(sharediff: float, n: int, who: str) -> None:
         """Common bookkeeping for a submitted share ("ticket")."""
-        STATS["best_session"] = max(STATS["best_session"], sharediff)
-        if sharediff > STATS["best_alltime"]:
-            STATS["best_alltime"] = sharediff
+        with STATS_LOCK:
+            STATS["best_session"] = max(STATS["best_session"], sharediff)
+            new_record = sharediff > STATS["best_alltime"]
+            if new_record:
+                STATS["best_alltime"] = sharediff
+            STATS["draws"].insert(0, {
+                "t": int(time.time()), "nonce": f"{n:08X}",
+                "diff": round(sharediff, 3), "who": who,
+            })
+            del STATS["draws"][30:]
+        if new_record:
             save_best()
             print(f"[RECORD] best \"ticket\" so far: diff {sharediff:,.0f}")
-        STATS["draws"].insert(0, {
-            "t": int(time.time()), "nonce": f"{n:08X}",
-            "diff": round(sharediff, 3), "who": who,
-        })
-        del STATS["draws"][30:]
 
     print(f"Mining to address {BTC_ADDRESS}. Ctrl+C = quit.")
     try:
@@ -774,8 +782,7 @@ def run_session(rig: CpuRig | None) -> None:
                             else:
                                 rejected += 1
                                 print(f"[pool rejected share: {m.get('error')}]")
-                            STATS["accepted"] = accepted
-                            STATS["rejected"] = rejected
+                            # STATS gets these under the lock further down the loop
                     else:
                         conn.handle(m, conn_name)
             target = int(DIFF1_TARGET / st.difficulty)
@@ -996,7 +1003,6 @@ def run_session(rig: CpuRig | None) -> None:
                     pass
 
             # 4) dashboard stats + a status line once per minute
-            STATS["pool"]["difficulty"] = st.difficulty
             devices = [
                 {"name": v.name, "port": v.port, "hs": round(v.hs(), 1), "shares": v.shares}
                 for v in sticks.values()
@@ -1010,7 +1016,11 @@ def run_session(rig: CpuRig | None) -> None:
                                 "hs": round(rig.hs(), 1), "shares": rig.shares})
             if CFG.get("browser_mining"):
                 devices.extend(web_live_players())
-            STATS["devices"] = devices
+            with STATS_LOCK:
+                STATS["pool"]["difficulty"] = st.difficulty
+                STATS["devices"] = devices
+                STATS["accepted"] = accepted
+                STATS["rejected"] = rejected
             if len(seen) > 4000:
                 seen.clear()   # old jobs never come back; no need to keep the memory
             if time.time() - last_status > 60:
