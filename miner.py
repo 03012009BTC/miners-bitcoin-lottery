@@ -370,7 +370,9 @@ def connect_pool(worker: str, diff: float, name: str) -> Stratum:
     st.send("mining.authorize", [worker, "x"])
     st.send("mining.suggest_difficulty", [diff])
     start = time.time()
-    while (not st.extranonce1 or st.job is None) and time.time() - start < 30:
+    # the pool sometimes takes its time with the first job — 30 s was too tight
+    # and cost us a full session teardown (devices included) every few hours
+    while (not st.extranonce1 or st.job is None) and time.time() - start < 90:
         for m in st.read():
             if m.get("id") in st.pending:
                 method = st.pending.pop(m["id"])
@@ -384,7 +386,7 @@ def connect_pool(worker: str, diff: float, name: str) -> Stratum:
                 st.handle(m, name)
         time.sleep(0.02)
     if st.job is None:
-        raise ConnectionError(f"{name} sent no job within 30 s")
+        raise ConnectionError(f"{name} sent no job within 90 s")
     return st
 
 
@@ -730,8 +732,12 @@ def run_session(rig: CpuRig | None) -> None:
     STATS["pool"]["connected"] = True
     st_cpu = None
     if rig is not None or CFG.get("browser_mining"):
-        # CPUs and browsers share one low-difficulty connection, separate from the sticks
-        st_cpu = connect_pool(WORKER_CPU, float(CFG["cpu_suggest_difficulty"]), "pool/cpu")
+        # CPUs and browsers share one low-difficulty connection, separate from the sticks.
+        # It is a nice-to-have: if it will not come up, the sticks still mine.
+        try:
+            st_cpu = connect_pool(WORKER_CPU, float(CFG["cpu_suggest_difficulty"]), "pool/cpu")
+        except (ConnectionError, OSError) as e:
+            print(f"[pool/cpu] not available ({e}) — sticks keep mining, CPU/browser sit this session out")
 
     target = int(DIFF1_TARGET / st.difficulty)
     extranonce2 = 0
@@ -739,7 +745,9 @@ def run_session(rig: CpuRig | None) -> None:
     cpu_diff = cpu_job_id = None
     web_uid = 0
     web_jobs: dict[int, tuple[bytes, str, str, str, int]] = {}
-    accepted = rejected = 0
+    # carry the totals across pool reconnects — a dropped connection should not
+    # make the dashboard look like the session started over
+    accepted, rejected = STATS["accepted"], STATS["rejected"]
     seen: set[tuple[str, int]] = set()
     sticks: dict[str, Stick] = {}
     jals: dict[str, Jalapeno] = {}
