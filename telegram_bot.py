@@ -112,13 +112,34 @@ COMMANDS = {
 }
 
 
+def register_menu(token: str) -> None:
+    """Put the commands into Telegram's own '/' menu, with descriptions."""
+    cmds = [
+        {"command": "status", "description": "how the fleet is doing"},
+        {"command": "start", "description": "start mining"},
+        {"command": "stop", "description": "stop mining"},
+        {"command": "restart", "description": "stop, then start"},
+        {"command": "log", "description": "last lines of the miner log"},
+        {"command": "help", "description": "list the commands"},
+    ]
+    data = urllib.parse.urlencode({"commands": json.dumps(cmds)}).encode()
+    req = urllib.request.Request(
+        f"https://api.telegram.org/bot{token}/setMyCommands", data=data)
+    try:
+        urllib.request.urlopen(req, timeout=20).read()
+    except Exception as e:
+        print(f"could not register the command menu: {e}")
+
+
 def main() -> None:
     cfg = load_config()
     token, owner = cfg.get("telegram_token", ""), str(cfg.get("telegram_chat_id", ""))
     if not token or not owner:
         raise SystemExit("Set telegram_token and telegram_chat_id in config.json first.")
+    register_menu(token)
     print(f"listening for commands from chat {owner} — Ctrl+C to quit")
-    send(token, owner, "\U0001f916 Remote control is up. /help for the list.")
+    send(token, owner, "\U0001f916 Remote control is up. Buttons are below, "
+                       "or tap the ☰ menu next to the text field.")
 
     offset = 0
     while True:

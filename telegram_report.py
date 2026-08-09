@@ -104,11 +104,23 @@ def build_report(cfg: dict) -> str:
     return "\n".join(lines)
 
 
-def send(token: str, chat_id: str, text: str) -> None:
-    data = urllib.parse.urlencode({
+# Buttons that stay under the text field, so the controls are always one tap
+# away instead of something you have to remember or scroll back for.
+KEYBOARD = {
+    "keyboard": [["/status", "/log"], ["/restart", "/stop"]],
+    "resize_keyboard": True,
+    "is_persistent": True,
+}
+
+
+def send(token: str, chat_id: str, text: str, keyboard: bool = True) -> None:
+    fields = {
         "chat_id": chat_id, "text": text, "parse_mode": "HTML",
         "disable_web_page_preview": "true",
-    }).encode()
+    }
+    if keyboard:
+        fields["reply_markup"] = json.dumps(KEYBOARD)
+    data = urllib.parse.urlencode(fields).encode()
     req = urllib.request.Request(f"https://api.telegram.org/bot{token}/sendMessage", data=data)
     with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
         if not json.loads(r.read().decode("utf-8")).get("ok"):
