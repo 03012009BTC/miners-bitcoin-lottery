@@ -606,11 +606,14 @@ class Jalapeno:
             while not self._shutdown:
                 if self.flush:
                     self.flush = False
-                    try:                           # drop work prepared for the old block
-                        while True:
-                            self.work_q.get_nowait()
-                    except queue.Empty:
-                        pass
+                    # drop work prepared for the old block — and results already
+                    # found for it, which would only earn a "stale share"
+                    for q in (self.work_q, self.out_q):
+                        try:
+                            while True:
+                                q.get_nowait()
+                        except queue.Empty:
+                            pass
                     self.s.write(b"ZQX")
                     self._line()
                     self.jobs.clear()
