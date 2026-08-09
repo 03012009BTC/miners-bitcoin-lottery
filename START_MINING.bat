@@ -21,7 +21,13 @@ if errorlevel 1 (
 chcp 65001 >nul
 set PYTHONIOENCODING=utf-8
 title MINERS - Bitcoin Lottery (public-pool.io)
-powershell -NoProfile -Command "python -u miner.py 2>&1 | Tee-Object -FilePath miner.log -Append"
+
+rem  Use the bundled Python if this is the portable package, otherwise the
+rem  one installed on the system.
+set "PY=python"
+if exist "%~dp0python\python.exe" set "PY=.\python\python.exe"
+
+powershell -NoProfile -Command "& '%PY%' -u miner.py 2>&1 | Tee-Object -FilePath miner.log -Append"
 echo.
 echo Mining stopped. Press any key to close this window.
 pause >nul
