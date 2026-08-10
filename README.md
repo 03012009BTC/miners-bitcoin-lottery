@@ -20,6 +20,10 @@ can't read (see the warning below).
 | Butterfly Labs Jalapeño (BFLSC) | 2× BFL SC, text protocol | ~4.5–5.3 GH/s | ✅ mining, hotplug, temp watch |
 | Bi•Fury (BXF) | 2× Bitfury, text protocol | ~5 GH/s | identification branch only |
 
+**Got an old stick in a drawer?** → **[Does my old USB Bitcoin miner still work?](HARDWARE.md)**
+— what is supported, what is not (yet), how to find out which device you have, and
+the fixes for every way we have seen one refuse to start.
+
 ## Quick start (Windows)
 
 1. Install Python 3.10+ **from python.org only** and `pip install pyserial`
