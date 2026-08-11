@@ -101,6 +101,8 @@ def build_report(cfg: dict) -> str:
     except Exception:
         pass
 
+    lines.append("")
+    lines.append("Good luck \U0001f340")
     return "\n".join(lines)
 
 
