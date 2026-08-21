@@ -155,8 +155,19 @@ def main() -> None:
     if not chat_id:
         raise SystemExit('Put your chat id into config.json as "telegram_chat_id" '
                          '(run this with --chat-id to find it).')
-    send(token, str(chat_id), build_report(cfg))
-    print("report sent")
+    # The laptop's Wi-Fi is not always up at 08:00, and one failed request
+    # should not cost the whole daily report — keep trying for ten minutes.
+    last = None
+    for attempt in range(10):
+        try:
+            send(token, str(chat_id), build_report(cfg))
+            print("report sent" + (f" (attempt {attempt + 1})" if attempt else ""))
+            return
+        except Exception as e:
+            last = e
+            print(f"attempt {attempt + 1} failed: {e}")
+            time.sleep(60)
+    raise SystemExit(f"gave up after 10 attempts: {last}")
 
 
 if __name__ == "__main__":
