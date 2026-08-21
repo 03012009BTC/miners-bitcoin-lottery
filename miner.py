@@ -41,6 +41,9 @@ STATE_FILE = os.path.join(_DIR, "lottery_best.json")
 DEFAULTS = {
     "btc_address": "",                # YOUR bitcoin address (bc1...) — the miner refuses to start without it
     "worker_name": "sticks",          # worker suffix for the USB sticks
+    "pool_user": "",                  # leave empty for solo pools that use your address as the
+                                      # login (public-pool). Pools with accounts (Braiins, Ocean)
+                                      # want their username here instead.
     "pool_host": "public-pool.io",
     "pool_port": 21496,
     "dashboard_port": 8888,
@@ -101,8 +104,11 @@ CFG = load_config()
 POOL_HOST = CFG["pool_host"]
 POOL_PORT = int(CFG["pool_port"])
 BTC_ADDRESS = CFG["btc_address"]
-WORKER = f"{BTC_ADDRESS}.{CFG['worker_name']}"
-WORKER_CPU = f"{BTC_ADDRESS}.cpu"
+# Solo pools use your bitcoin address as the login; pools with accounts want a
+# username. pool_user picks between the two without touching anything else.
+POOL_LOGIN = CFG.get("pool_user") or BTC_ADDRESS
+WORKER = f"{POOL_LOGIN}.{CFG['worker_name']}"
+WORKER_CPU = f"{POOL_LOGIN}.cpu"
 DASHBOARD_PORT = int(CFG["dashboard_port"])
 DIFF1_TARGET = 0xFFFF * 2**208
 
