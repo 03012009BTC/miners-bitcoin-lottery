@@ -445,12 +445,19 @@ function render(st){
     `<span><span class="chip" style="background:${colFor(d.name,i)}"></span>${d.name}</span>`).join("");
 
   for (const d of [...st.draws].reverse()){
-    const key = d.t + d.nonce;
+    const key = d.t + (d.nonce || d.who);
     if (seenDraws.has(key)) continue;
     seenDraws.add(key);
     if (seenDraws.size > 400) seenDraws = new Set([...seenDraws].slice(-200));
-    spinNonce(d.nonce, d.who, d.diff);
-    log(`"ticket" sent — diff ${fmtDiff(d.diff)} (${d.who})`, "okx");
+    // Machines that mine on their own send their tickets straight to the pool,
+    // so we never see the individual numbers - only the moment one of them
+    // beats its own best. No nonce to spin, but it still belongs in the feed.
+    if (d.nonce){
+      spinNonce(d.nonce, d.who, d.diff);
+      log(`"ticket" sent — diff ${fmtDiff(d.diff)} (${d.who})`, "okx");
+    } else {
+      log(`new best "ticket" — diff ${fmtDiff(d.diff)} (${d.who})`, "okx");
+    }
   }
 
   samples.push({t: Date.now(), g: st.devices.map(d=>d.hs)});

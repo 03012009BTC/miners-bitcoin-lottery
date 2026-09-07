@@ -584,6 +584,8 @@ def axeos_poll_once(host: str) -> dict | None:
         "hs": round(hs, 1),
         "shares": int(d.get("sharesAccepted") or 0),
         "temp": round(float(temp)) if temp not in (None, -1) else None,
+        "best": float(d.get("bestSessionDiff") or 0),
+        "worker": str(d.get("stratumUser") or "").rsplit(".", 1)[-1].strip().lower(),
     }
 
 
@@ -593,6 +595,7 @@ def axeos_watch(hosts: list[str]) -> None:
     # 9 and 1000 GH/s every few seconds. Only give up on a device that has been
     # silent for a while.
     last_seen: dict[str, float] = {}
+    best_seen: dict[str, float] = {}
     while True:
         for host in hosts:
             entry = axeos_poll_once(host)
@@ -601,8 +604,57 @@ def axeos_watch(hosts: list[str]) -> None:
                     AXEOS[host] = entry
                     last_seen[host] = time.time()
                 elif time.time() - last_seen.get(host, 0) > AXEOS_GONE_SECONDS:
-                    AXEOS.pop(host, None)      # really gone: drop it from the dashboard
+                    # Out of reach over Wi-Fi is not the same as switched off.
+                    # If the pool is still being paid tickets by this machine,
+                    # it is plainly still in the game and belongs on the board.
+                    fallback = _pool_view(AXEOS.get(host))
+                    if fallback:
+                        AXEOS[host] = fallback
+                    else:
+                        AXEOS.pop(host, None)
+            if entry:
+                # These machines send their tickets straight to the pool, so we
+                # never see them one by one the way we see our own. What we can
+                # see is the device beating its own best, which is the moment
+                # worth watching anyway.
+                announce_best(entry["name"], entry["best"], best_seen, host)
         time.sleep(AXEOS_POLL_SECONDS)
+
+
+def _pool_view(entry: dict | None) -> dict | None:
+    """The same device as the pool sees it, for when we cannot reach it ourselves."""
+    if not entry or not entry.get("worker"):
+        return None
+    with POOLW_LOCK:
+        hs = POOL_RATES.get(entry["worker"])
+    if hs is None:
+        return None
+    name = entry["name"].removesuffix(" (via pool)")
+    return {"name": f"{name} (via pool)", "port": "pool", "hs": round(hs, 1),
+            "shares": None, "temp": None, "best": entry.get("best", 0.0),
+            "worker": entry["worker"]}
+
+
+def announce_best(who: str, best: float, seen: dict[str, float], key: str) -> None:
+    previous = seen.get(key)
+    seen[key] = best
+    # The first reading only sets the mark: whatever the device did before we
+    # started watching is its own history, not something that happened here.
+    if previous is None or best <= previous:
+        return
+    with STATS_LOCK:
+        STATS["draws"].insert(0, {"t": int(time.time()), "nonce": None,
+                                  "diff": round(best, 3), "who": who})
+        del STATS["draws"][30:]
+        STATS["best_session"] = max(STATS["best_session"], best)
+        record = best > STATS["best_alltime"]
+        if record:
+            STATS["best_alltime"] = best
+    if record:
+        save_best()
+        print(f"[RECORD] best \"ticket\" so far: diff {best:,.0f} ({who})")
+    else:
+        print(f"[{who}] new best \"ticket\": diff {best:,.0f}")
 
 
 # ---------------------------- Butterfly Labs Jalapeno (BFLSC) ----------------------------
