@@ -488,6 +488,7 @@ class Stick:
 POOL_STATS_API = "https://public-pool.io:40557/api/client/{address}"
 POOLW_LOCK = threading.Lock()
 POOLW: dict[str, dict] = {}
+POOL_RATES: dict[str, float] = {}    # every worker the pool sees -> H/s, for cross-checking
 POOLW_POLL_SECONDS = 60
 POOLW_STALE_SECONDS = 900          # a session quiet this long is not in the game any more
 
@@ -504,34 +505,38 @@ def _seen_seconds_ago(iso: str | None) -> float:
         return 0.0
 
 
-def poolw_poll_once(names: set[str], address: str) -> dict[str, dict]:
-    """One reading of the pool's worker list, one entry per name (sessions summed)."""
+def poolw_poll_once(address: str) -> dict[str, float]:
+    """What the pool currently credits to each worker name, in H/s (sessions summed)."""
     with urllib.request.urlopen(POOL_STATS_API.format(address=address), timeout=15) as r:
         data = json.loads(r.read().decode("utf-8"))
     agg: dict[str, float] = {}
     for w in data.get("workers", []):
         name = str(w.get("name", "")).strip()
-        if name.lower() not in names:
-            continue
-        if _seen_seconds_ago(w.get("lastSeen")) > POOLW_STALE_SECONDS:
+        if not name or _seen_seconds_ago(w.get("lastSeen")) > POOLW_STALE_SECONDS:
             continue                                   # old session, device has moved on
-        agg[name] = agg.get(name, 0.0) + float(w.get("hashRate") or 0)
-    # shares stay None: the pool reports totals for the address, not per worker
-    return {n: {"name": f"{n} (via pool)", "port": "pool", "hs": round(hs, 1),
-                "shares": None} for n, hs in agg.items()}
+        agg[name.lower()] = agg.get(name.lower(), 0.0) + float(w.get("hashRate") or 0)
+    return agg
 
 
 def poolw_watch(names: list[str], address: str) -> None:
+    # Runs whenever we have an address: the rates are worth having even when
+    # nothing is listed for display, because a device that lies about its own
+    # speed can be measured against them.
     wanted = {n.strip().lower() for n in names if n.strip()}
     while True:
         try:
-            fresh = poolw_poll_once(wanted, address)
+            rates = poolw_poll_once(address)
         except Exception:
-            fresh = None                               # pool unreachable: keep the last reading
-        if fresh is not None:
+            rates = None                               # pool unreachable: keep the last reading
+        if rates is not None:
             with POOLW_LOCK:
+                POOL_RATES.clear()
+                POOL_RATES.update(rates)
                 POOLW.clear()
-                POOLW.update(fresh)
+                # shares stay None: the pool counts them per address, not per worker
+                POOLW.update({n: {"name": f"{n} (via pool)", "port": "pool",
+                                  "hs": round(hs, 1), "shares": None}
+                              for n, hs in rates.items() if n in wanted})
         time.sleep(POOLW_POLL_SECONDS)
 
 
@@ -562,10 +567,17 @@ def axeos_poll_once(host: str) -> dict | None:
     expected = float(d.get("expectedHashrate") or 0) * 1e9
     if expected > 0 and hs > 3 * expected:
         with AXEOS_LOCK:
-            previous = AXEOS.get(host, {}).get("hs")
-        if previous is None:
+            believable = AXEOS.get(host, {}).get("hs")
+        if believable is None:
+            # Nothing believable of our own — ask the pool, which counts this
+            # device's shares and cannot be fooled by its arithmetic. Without
+            # this the device could never come back once it had dropped out.
+            worker = str(d.get("stratumUser") or "").rsplit(".", 1)[-1].strip().lower()
+            with POOLW_LOCK:
+                believable = POOL_RATES.get(worker)
+        if believable is None:
             return None
-        hs = previous
+        hs = believable
     return {
         "name": f"Bitaxe {d.get('ASICModel', '')}".strip() + f" ({d.get('hostname') or host})",
         "port": host,
@@ -1205,8 +1217,8 @@ def main() -> None:
         print(f"[axeos] watching {', '.join(hosts)} — they mine on their own, "
               f"we only show them")
     pworkers = [str(w).strip() for w in (CFG.get("pool_workers") or []) if str(w).strip()]
+    threading.Thread(target=poolw_watch, args=(pworkers, BTC_ADDRESS), daemon=True).start()
     if pworkers:
-        threading.Thread(target=poolw_watch, args=(pworkers, BTC_ADDRESS), daemon=True).start()
         print(f"[pool] also showing workers the pool sees: {', '.join(pworkers)}")
     if CFG.get("browser_mining"):
         print(f"[web] browser players welcome — open the dashboard and press PLAY "
