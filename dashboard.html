@@ -343,8 +343,10 @@ let NET_DIFF = 126.23e12, LOG_MAX = Math.log10(NET_DIFF);
 const COLS = ["#1ea452", "#2790c4", "#b57a00"];
 const CPU_COL = "#8a8a8a";
 // color follows the device, not its position: sticks take the fixed palette, the CPU is always grey
+const BITAXE_COL = "#8b5cf6";
 const colFor = (name, i) => name.startsWith("CPU") ? CPU_COL
-  : name.startsWith("Jalapeno") ? "#b57a00" : COLS[i % COLS.length];
+  : name.startsWith("Jalapeno") ? "#b57a00"
+  : name.startsWith("Bitaxe") ? BITAXE_COL : COLS[i % COLS.length];
 const fmt = (x, d=2) => x.toLocaleString("en-US", {minimumFractionDigits:d, maximumFractionDigits:d});
 const fmtRate = hs => hs>=1e9 ? fmt(hs/1e9,2)+" GH/s" : hs>=1e6 ? fmt(hs/1e6,2)+" MH/s" :
                       hs>=1e3 ? fmt(hs/1e3,1)+" kH/s" : fmt(hs,0)+" H/s";

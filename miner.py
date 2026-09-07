@@ -22,6 +22,7 @@ import socket
 import struct
 import threading
 import time
+import urllib.request
 from collections import deque
 from hashlib import sha256
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -52,6 +53,9 @@ DEFAULTS = {
     "cpu_workers": 0,                 # 0 = automatic (CPU cores - 1, at least 1)
     "cpu_suggest_difficulty": 1,      # CPUs are slow; ask the pool for the easiest shares
     "browser_mining": True,           # let phones/tablets/PCs join by pressing PLAY in the dashboard
+    "axeos_devices": [],              # Bitaxe & friends on your network, e.g. ["192.168.31.97"].
+                                      # They mine on their own; we only read their status so the
+                                      # whole fleet shows up in one dashboard.
 }
 
 
@@ -471,6 +475,44 @@ class Stick:
             self.s.close()
         except (OSError, serial.SerialException):
             pass
+
+
+# ---------------------------- AxeOS devices (Bitaxe & friends) ----------------------------
+# A Bitaxe talks to the pool by itself — this miner never sends it work. All we
+# do is read its status page every few seconds so one dashboard can show the
+# whole fleet, old sticks and new silicon side by side.
+AXEOS_LOCK = threading.Lock()
+AXEOS: dict[str, dict] = {}          # host -> dashboard entry, missing while unreachable
+AXEOS_POLL_SECONDS = 10
+
+
+def axeos_poll_once(host: str) -> dict | None:
+    """One reading from an AxeOS device, shaped like our own device entries."""
+    try:
+        with urllib.request.urlopen(f"http://{host}/api/system/info", timeout=6) as r:
+            d = json.loads(r.read().decode("utf-8"))
+    except Exception:
+        return None
+    temp = d.get("temp")
+    return {
+        "name": f"Bitaxe {d.get('ASICModel', '')}".strip() + f" ({d.get('hostname') or host})",
+        "port": host,
+        "hs": round(float(d.get("hashRate") or 0) * 1e9, 1),   # AxeOS reports GH/s
+        "shares": int(d.get("sharesAccepted") or 0),
+        "temp": round(float(temp)) if temp not in (None, -1) else None,
+    }
+
+
+def axeos_watch(hosts: list[str]) -> None:
+    while True:
+        for host in hosts:
+            entry = axeos_poll_once(host)
+            with AXEOS_LOCK:
+                if entry:
+                    AXEOS[host] = entry
+                else:
+                    AXEOS.pop(host, None)      # gone quiet: drop it from the dashboard
+        time.sleep(AXEOS_POLL_SECONDS)
 
 
 # ---------------------------- Butterfly Labs Jalapeno (BFLSC) ----------------------------
@@ -1035,6 +1077,8 @@ def run_session(rig: CpuRig | None) -> None:
             if rig is not None:
                 devices.append({"name": rig.name, "port": "—",
                                 "hs": round(rig.hs(), 1), "shares": rig.shares})
+            with AXEOS_LOCK:
+                devices.extend(AXEOS.values())
             if CFG.get("browser_mining"):
                 devices.extend(web_live_players())
             with STATS_LOCK:
@@ -1075,6 +1119,11 @@ def main() -> None:
             n = max(1, (os.cpu_count() or 2) - 1)   # leave one core for the human
         rig = CpuRig(n)
         print(f"[cpu] {rig.name} joined the game — every hash is a \"ticket\"")
+    hosts = [str(h).strip() for h in (CFG.get("axeos_devices") or []) if str(h).strip()]
+    if hosts:
+        threading.Thread(target=axeos_watch, args=(hosts,), daemon=True).start()
+        print(f"[axeos] watching {', '.join(hosts)} — they mine on their own, "
+              f"we only show them")
     if CFG.get("browser_mining"):
         print(f"[web] browser players welcome — open the dashboard and press PLAY "
               f"(phones: http://PC-IP:{DASHBOARD_PORT})")
