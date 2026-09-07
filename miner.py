@@ -53,6 +53,9 @@ DEFAULTS = {
     "cpu_workers": 0,                 # 0 = automatic (CPU cores - 1, at least 1)
     "cpu_suggest_difficulty": 1,      # CPUs are slow; ask the pool for the easiest shares
     "browser_mining": True,           # let phones/tablets/PCs join by pressing PLAY in the dashboard
+    "pool_workers": [],               # worker names the pool knows about but this miner does not
+                                      # drive — a NerdMiner, someone else's rig on your address.
+                                      # Anything listed here shows up in the dashboard too.
     "axeos_devices": [],              # Bitaxe & friends on your network, e.g. ["192.168.31.97"].
                                       # They mine on their own; we only read their status so the
                                       # whole fleet shows up in one dashboard.
@@ -477,6 +480,61 @@ class Stick:
             pass
 
 
+# ---------------------------- workers the pool sees ----------------------------
+# Some miners are deaf to the network — a NerdMiner has no API at all. But if it
+# mines to your address, the pool knows about it, so we ask the pool instead.
+# That way anything pointed at your address can appear in the dashboard, even
+# hardware that tells us nothing directly. (public-pool's API; other pools differ.)
+POOL_STATS_API = "https://public-pool.io:40557/api/client/{address}"
+POOLW_LOCK = threading.Lock()
+POOLW: dict[str, dict] = {}
+POOLW_POLL_SECONDS = 60
+POOLW_STALE_SECONDS = 900          # a session quiet this long is not in the game any more
+
+
+def _seen_seconds_ago(iso: str | None) -> float:
+    """How long since the pool last heard from a session. Unknown counts as fresh."""
+    if not iso:
+        return 0.0
+    try:
+        from datetime import datetime, timezone
+        t = datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
+        return (datetime.now(timezone.utc) - t).total_seconds()
+    except Exception:
+        return 0.0
+
+
+def poolw_poll_once(names: set[str], address: str) -> dict[str, dict]:
+    """One reading of the pool's worker list, one entry per name (sessions summed)."""
+    with urllib.request.urlopen(POOL_STATS_API.format(address=address), timeout=15) as r:
+        data = json.loads(r.read().decode("utf-8"))
+    agg: dict[str, float] = {}
+    for w in data.get("workers", []):
+        name = str(w.get("name", "")).strip()
+        if name.lower() not in names:
+            continue
+        if _seen_seconds_ago(w.get("lastSeen")) > POOLW_STALE_SECONDS:
+            continue                                   # old session, device has moved on
+        agg[name] = agg.get(name, 0.0) + float(w.get("hashRate") or 0)
+    # shares stay None: the pool reports totals for the address, not per worker
+    return {n: {"name": f"{n} (via pool)", "port": "pool", "hs": round(hs, 1),
+                "shares": None} for n, hs in agg.items()}
+
+
+def poolw_watch(names: list[str], address: str) -> None:
+    wanted = {n.strip().lower() for n in names if n.strip()}
+    while True:
+        try:
+            fresh = poolw_poll_once(wanted, address)
+        except Exception:
+            fresh = None                               # pool unreachable: keep the last reading
+        if fresh is not None:
+            with POOLW_LOCK:
+                POOLW.clear()
+                POOLW.update(fresh)
+        time.sleep(POOLW_POLL_SECONDS)
+
+
 # ---------------------------- AxeOS devices (Bitaxe & friends) ----------------------------
 # A Bitaxe talks to the pool by itself — this miner never sends it work. All we
 # do is read its status page every few seconds so one dashboard can show the
@@ -484,6 +542,7 @@ class Stick:
 AXEOS_LOCK = threading.Lock()
 AXEOS: dict[str, dict] = {}          # host -> dashboard entry, missing while unreachable
 AXEOS_POLL_SECONDS = 10
+AXEOS_GONE_SECONDS = 120             # silent this long and the device is really gone
 
 
 def axeos_poll_once(host: str) -> dict | None:
@@ -494,24 +553,43 @@ def axeos_poll_once(host: str) -> dict | None:
     except Exception:
         return None
     temp = d.get("temp")
+    hs = float(d.get("hashRate") or 0) * 1e9                   # AxeOS reports GH/s
+    # AxeOS smooths its hashrate over time, and a difficulty change at the wrong
+    # moment can throw that average wildly off — seen live: 401 TH/s claimed from
+    # a 20 W board. Its own expected rate is the sanity check; an impossible
+    # reading is dropped and the last believable one kept, because a number that
+    # is 300x too big is worse than a number that is a few minutes old.
+    expected = float(d.get("expectedHashrate") or 0) * 1e9
+    if expected > 0 and hs > 3 * expected:
+        with AXEOS_LOCK:
+            previous = AXEOS.get(host, {}).get("hs")
+        if previous is None:
+            return None
+        hs = previous
     return {
         "name": f"Bitaxe {d.get('ASICModel', '')}".strip() + f" ({d.get('hostname') or host})",
         "port": host,
-        "hs": round(float(d.get("hashRate") or 0) * 1e9, 1),   # AxeOS reports GH/s
+        "hs": round(hs, 1),
         "shares": int(d.get("sharesAccepted") or 0),
         "temp": round(float(temp)) if temp not in (None, -1) else None,
     }
 
 
 def axeos_watch(hosts: list[str]) -> None:
+    # One missed answer means nothing — a flaky Wi-Fi drops a request now and
+    # then, and dropping the device over it made the fleet total jump between
+    # 9 and 1000 GH/s every few seconds. Only give up on a device that has been
+    # silent for a while.
+    last_seen: dict[str, float] = {}
     while True:
         for host in hosts:
             entry = axeos_poll_once(host)
             with AXEOS_LOCK:
                 if entry:
                     AXEOS[host] = entry
-                else:
-                    AXEOS.pop(host, None)      # gone quiet: drop it from the dashboard
+                    last_seen[host] = time.time()
+                elif time.time() - last_seen.get(host, 0) > AXEOS_GONE_SECONDS:
+                    AXEOS.pop(host, None)      # really gone: drop it from the dashboard
         time.sleep(AXEOS_POLL_SECONDS)
 
 
@@ -1079,6 +1157,8 @@ def run_session(rig: CpuRig | None) -> None:
                                 "hs": round(rig.hs(), 1), "shares": rig.shares})
             with AXEOS_LOCK:
                 devices.extend(AXEOS.values())
+            with POOLW_LOCK:
+                devices.extend(POOLW.values())
             if CFG.get("browser_mining"):
                 devices.extend(web_live_players())
             with STATS_LOCK:
@@ -1124,6 +1204,10 @@ def main() -> None:
         threading.Thread(target=axeos_watch, args=(hosts,), daemon=True).start()
         print(f"[axeos] watching {', '.join(hosts)} — they mine on their own, "
               f"we only show them")
+    pworkers = [str(w).strip() for w in (CFG.get("pool_workers") or []) if str(w).strip()]
+    if pworkers:
+        threading.Thread(target=poolw_watch, args=(pworkers, BTC_ADDRESS), daemon=True).start()
+        print(f"[pool] also showing workers the pool sees: {', '.join(pworkers)}")
     if CFG.get("browser_mining"):
         print(f"[web] browser players welcome — open the dashboard and press PLAY "
               f"(phones: http://PC-IP:{DASHBOARD_PORT})")
