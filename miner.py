@@ -559,13 +559,13 @@ def axeos_poll_once(host: str) -> dict | None:
         return None
     temp = d.get("temp")
     hs = float(d.get("hashRate") or 0) * 1e9                   # AxeOS reports GH/s
-    # AxeOS smooths its hashrate over time, and a difficulty change at the wrong
-    # moment can throw that average wildly off — seen live: 401 TH/s claimed from
-    # a 20 W board. Its own expected rate is the sanity check; an impossible
-    # reading is dropped and the last believable one kept, because a number that
-    # is 300x too big is worse than a number that is a few minutes old.
+    # AxeOS works its own hashrate out from shares over time, and on this
+    # firmware that sum goes wrong in BOTH directions: 401 TH/s claimed from a
+    # 20 W board one afternoon, a flat 0 the next morning — while the pool was
+    # being paid tickets throughout, and the board sat at 20 W and 60 C. So
+    # anything far from what the board is built for is simply not believed.
     expected = float(d.get("expectedHashrate") or 0) * 1e9
-    if expected > 0 and hs > 3 * expected:
+    if expected > 0 and not (0.1 * expected <= hs <= 3 * expected):
         with AXEOS_LOCK:
             believable = AXEOS.get(host, {}).get("hs")
         if believable is None:
