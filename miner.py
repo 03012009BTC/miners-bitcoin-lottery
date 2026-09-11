@@ -489,7 +489,9 @@ POOL_STATS_API = "https://public-pool.io:40557/api/client/{address}"
 POOLW_LOCK = threading.Lock()
 POOLW: dict[str, dict] = {}
 POOL_RATES: dict[str, float] = {}    # every worker the pool sees -> H/s, for cross-checking
+POOL_HISTORY: dict[str, deque] = {}
 POOLW_POLL_SECONDS = 60
+POOLW_SMOOTH = 20                    # readings kept per worker, so ~20 minutes of them
 POOLW_STALE_SECONDS = 900          # a session quiet this long is not in the game any more
 
 
@@ -530,8 +532,20 @@ def poolw_watch(names: list[str], address: str) -> None:
             rates = None                               # pool unreachable: keep the last reading
         if rates is not None:
             with POOLW_LOCK:
+                # A pool works a rate out from the tickets it was sent, so a short
+                # window swings wildly on luck alone: the same board read 1068,
+                # 852 and 650 GH/s within a day while its true average sat at 903.
+                # Averaging our own readings gives a number that matches what the
+                # machine is really doing, the way the sticks are already measured.
+                for name, hs in rates.items():
+                    POOL_HISTORY.setdefault(
+                        name, deque(maxlen=POOLW_SMOOTH)).append(hs)
+                for name in list(POOL_HISTORY):
+                    if name not in rates:
+                        del POOL_HISTORY[name]             # worker gone; forget its history
                 POOL_RATES.clear()
-                POOL_RATES.update(rates)
+                POOL_RATES.update({n: sum(h) / len(h) for n, h in POOL_HISTORY.items()})
+                rates = POOL_RATES
                 POOLW.clear()
                 # shares stay None: the pool counts them per address, not per worker
                 POOLW.update({n: {"name": f"{n} (via pool)", "port": "pool",
