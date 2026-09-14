@@ -322,8 +322,13 @@ def dsha(b: bytes) -> bytes:
 class Stratum:
     """Minimal Stratum V1 client (TCP + JSON lines)."""
 
-    def __init__(self, host: str, port: int) -> None:
-        self.sock = socket.create_connection((host, port), timeout=30)
+    def __init__(self, host: str, port: int, name: str = "pool") -> None:
+        # the name goes into every error, so an outage says WHICH connection broke
+        self.name = name
+        try:
+            self.sock = socket.create_connection((host, port), timeout=30)
+        except OSError as e:
+            raise ConnectionError(f"{name}: {e}") from e
         self.sock.settimeout(0.05)
         self.buf = b""
         self.msg_id = 0
@@ -337,7 +342,10 @@ class Stratum:
     def send(self, method: str, params: list) -> int:
         self.msg_id += 1
         line = json.dumps({"id": self.msg_id, "method": method, "params": params}) + "\n"
-        self.sock.sendall(line.encode())
+        try:
+            self.sock.sendall(line.encode())
+        except OSError as e:
+            raise ConnectionError(f"{self.name}: {e}") from e
         self.pending[self.msg_id] = method
         return self.msg_id
 
@@ -345,11 +353,14 @@ class Stratum:
         """Return every complete JSON message that has arrived (short poll, no long block)."""
         try:
             data = self.sock.recv(4096)
-            if not data:
-                raise ConnectionError("pool closed the connection")
-            self.buf += data
         except socket.timeout:
-            pass
+            data = None
+        except OSError as e:
+            raise ConnectionError(f"{self.name}: {e}") from e
+        if data is not None:
+            if not data:
+                raise ConnectionError(f"{self.name}: the pool closed the connection")
+            self.buf += data
         messages = []
         while b"\n" in self.buf:
             line, self.buf = self.buf.split(b"\n", 1)
@@ -378,7 +389,7 @@ class Stratum:
 
 def connect_pool(worker: str, diff: float, name: str) -> Stratum:
     """Connect + subscribe + authorize one Stratum session; wait for the first job."""
-    st = Stratum(POOL_HOST, POOL_PORT)
+    st = Stratum(POOL_HOST, POOL_PORT, name)
     st.send("mining.subscribe", ["miners-bitcoin-lottery/1.0"])
     st.send("mining.authorize", [worker, "x"])
     st.send("mining.suggest_difficulty", [diff])
@@ -938,13 +949,33 @@ def run_session(rig: CpuRig | None) -> None:
     st = connect_pool(WORKER, float(CFG["suggest_difficulty"]), "pool")
     STATS["pool"]["connected"] = True
     st_cpu = None
-    if rig is not None or CFG.get("browser_mining"):
+    cpu_wanted = rig is not None or bool(CFG.get("browser_mining"))
+    # The CPU/browser connection is a spare: nothing the sticks do depends on it,
+    # and on a quiet day not a single ticket goes through it. It used to share the
+    # sticks' fate - when it dropped, the whole session was torn down, devices and
+    # all. Now it is reconnected on its own, in the background, while they mine on.
+    cpu_link = {"ready": None, "busy": False, "retry_at": 0.0, "over": False}
+
+    def reconnect_cpu() -> None:
+        try:
+            conn = connect_pool(WORKER_CPU, float(CFG["cpu_suggest_difficulty"]), "pool/cpu")
+            if cpu_link["over"]:
+                conn.sock.close()                  # the session ended while we waited
+            else:
+                cpu_link["ready"] = conn
+        except (ConnectionError, OSError) as e:
+            print(f"[pool/cpu] not available ({e}) — sticks keep mining, trying again in 60 s")
+            cpu_link["retry_at"] = time.time() + 60
+        finally:
+            cpu_link["busy"] = False
+
+    if cpu_wanted:
         # CPUs and browsers share one low-difficulty connection, separate from the sticks.
-        # It is a nice-to-have: if it will not come up, the sticks still mine.
         try:
             st_cpu = connect_pool(WORKER_CPU, float(CFG["cpu_suggest_difficulty"]), "pool/cpu")
         except (ConnectionError, OSError) as e:
-            print(f"[pool/cpu] not available ({e}) — sticks keep mining, CPU/browser sit this session out")
+            print(f"[pool/cpu] not available ({e}) — sticks keep mining, trying again in 60 s")
+            cpu_link["retry_at"] = time.time() + 60
 
     target = int(DIFF1_TARGET / st.difficulty)
     extranonce2 = 0
@@ -963,6 +994,20 @@ def run_session(rig: CpuRig | None) -> None:
     last_status = time.time()
     last_job = st.job["job_id"]
     warned_empty = False
+
+    def drop_cpu(e: Exception) -> None:
+        nonlocal st_cpu, cpu_job_id, cpu_diff
+        print(f"[pool/cpu] lost ({e}) — sticks keep mining, reconnecting it in 30 s")
+        try:
+            st_cpu.sock.close()
+        except OSError:
+            pass
+        st_cpu = None
+        cpu_job_id = cpu_diff = None               # a fresh job goes out once it is back
+        web_jobs.clear()                           # old browser work would only be rejected
+        with WEB_LOCK:
+            WEB["job"] = None
+        cpu_link["retry_at"] = time.time() + 30
 
     def record_ticket(sharediff: float, n: int, who: str) -> None:
         """Common bookkeeping for a submitted share ("ticket")."""
@@ -987,7 +1032,14 @@ def run_session(rig: CpuRig | None) -> None:
             for conn, conn_name in ((st, "pool"), (st_cpu, "pool/cpu")):
                 if conn is None:
                     continue
-                for m in conn.read():
+                try:
+                    messages = conn.read()
+                except ConnectionError as e:
+                    if conn is st:
+                        raise                      # the sticks' own line: full reconnect
+                    drop_cpu(e)
+                    continue
+                for m in messages:
                     if m.get("id") in conn.pending:
                         method = conn.pending.pop(m["id"])
                         if method == "mining.submit":
@@ -1015,6 +1067,15 @@ def run_session(rig: CpuRig | None) -> None:
                         jal.flush = True
                 last_job = st.job["job_id"]
                 st.clean = False
+
+            # the spare connection came back (or is due another try)
+            if cpu_wanted and st_cpu is None:
+                if cpu_link["ready"] is not None:
+                    st_cpu, cpu_link["ready"] = cpu_link["ready"], None
+                    print("[pool/cpu] reconnected — CPU/browser players are back in")
+                elif not cpu_link["busy"] and time.time() >= cpu_link["retry_at"]:
+                    cpu_link["busy"] = True
+                    threading.Thread(target=reconnect_cpu, daemon=True).start()
 
             # CPU + browsers: push a fresh job on job change or difficulty change
             if st_cpu is not None:
@@ -1060,6 +1121,8 @@ def run_session(rig: CpuRig | None) -> None:
                         record_ticket(DIFF1_TARGET / h_int, n, player_name)
                 except queue.Empty:
                     pass
+                except ConnectionError as e:
+                    drop_cpu(e)
 
             if st_cpu is not None and rig is not None:
                 # CPU worker results
@@ -1086,6 +1149,8 @@ def run_session(rig: CpuRig | None) -> None:
                             record_ticket(DIFF1_TARGET / h_int, n, rig.name)
                 except queue.Empty:
                     pass
+                except ConnectionError as e:
+                    drop_cpu(e)
 
             # 2) hotplug: every 5 s look for newly plugged devices
             if time.time() - last_scan > 5:
@@ -1257,6 +1322,13 @@ def run_session(rig: CpuRig | None) -> None:
 
             time.sleep(0.02)
     finally:
+        cpu_link["over"] = True
+        for conn in (st_cpu, cpu_link["ready"]):
+            if conn is not None:
+                try:
+                    conn.sock.close()
+                except OSError:
+                    pass
         for stick in sticks.values():
             stick.close()
         for jal in jals.values():
