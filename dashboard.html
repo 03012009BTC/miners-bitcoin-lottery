@@ -149,11 +149,15 @@
   .chip{display:inline-block; width:10px; height:10px; margin-right:8px}
   .num{text-align:right} th.num{text-align:right} .st-ok{color:var(--ok)} .st-err{color:var(--err)}
   .chartbox{padding:10px 14px 4px; position:relative}
-  .legend{display:flex; gap:18px; padding:6px 14px 12px; color:var(--ink-mut); font-size:13px}
+  /* legend items wrap as whole units - with a phone playing along there are five of them */
+  .legend{display:flex; flex-wrap:wrap; gap:6px 18px; padding:6px 14px 12px; color:var(--ink-mut); font-size:13px}
+  .legend > span{white-space:nowrap}
   .tip{position:absolute; display:none; background:var(--panel2); border:1px solid var(--border);
     padding:8px 10px; font-size:13px; pointer-events:none; z-index:5; min-width:150px}
   .tip b{color:var(--hero); font-weight:normal}
   .log{padding:10px 14px; height:140px; overflow-y:auto; font-size:13px; line-height:1.7}
+  /* a wrapped line stays indented under its own timestamp instead of looking like the next entry */
+  .log > div{padding-left:1.4em; text-indent:-1.4em}
   .log .t{color:var(--ink-dim)} .log .okx{color:var(--ok)} .log .gx{color:var(--gold)} .log .fx{color:var(--fire)}
   footer{color:var(--ink-dim); font-size:12px; text-align:center; margin-top:16px; line-height:1.8}
   footer .a{color:var(--ink-mut)}
