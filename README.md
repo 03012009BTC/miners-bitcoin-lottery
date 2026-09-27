@@ -39,6 +39,12 @@ The default pool is [public-pool.io](https://web.public-pool.io) (solo mode, no
 registration — your address is your account). Sticks hot-plug: plug one in at any
 time and it joins the game in ~5 seconds.
 
+BTC PoW Lab is also supported by the worker telemetry and dashboard link adapters.
+To use it, set `pool_host` to `stratum.btcpowlab-pool.com` and `pool_port` to
+`3333`. Its Hybrid Solo allocation sends 85 percent of a valid block reward to
+the finder, 10 percent to eligible community miners and 5 percent to the pool.
+Mining remains probabilistic and no block or reward is guaranteed.
+
 ## No ASIC stick? Your CPU can play too 🎟
 
 `cpu_mining` is **on by default**: the miner spawns one worker per CPU core

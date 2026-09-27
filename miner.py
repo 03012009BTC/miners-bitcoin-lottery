@@ -495,8 +495,18 @@ class Stick:
 # Some miners are deaf to the network — a NerdMiner has no API at all. But if it
 # mines to your address, the pool knows about it, so we ask the pool instead.
 # That way anything pointed at your address can appear in the dashboard, even
-# hardware that tells us nothing directly. (public-pool's API; other pools differ.)
-POOL_STATS_API = "https://public-pool.io:40557/api/client/{address}"
+# hardware that tells us nothing directly. Supported pools expose different API
+# shapes, so keep the endpoint and parser tied to the configured Stratum host.
+POOL_STATS_PROVIDERS = {
+    "public-pool.io": (
+        "https://public-pool.io:40557/api/client/{address}",
+        "public_pool",
+    ),
+    "stratum.btcpowlab-pool.com": (
+        "https://btcpowlab-pool.com/public/v1/miner/{address}",
+        "btc_pow_lab",
+    ),
+}
 POOLW_LOCK = threading.Lock()
 POOLW: dict[str, dict] = {}
 POOL_RATES: dict[str, float] = {}    # every worker the pool sees -> H/s, for cross-checking
@@ -512,6 +522,8 @@ def _seen_seconds_ago(iso: str | None) -> float:
         return 0.0
     try:
         from datetime import datetime, timezone
+        if isinstance(iso, (int, float)):
+            return max(0.0, time.time() - float(iso))
         t = datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
         return (datetime.now(timezone.utc) - t).total_seconds()
     except Exception:
@@ -520,14 +532,20 @@ def _seen_seconds_ago(iso: str | None) -> float:
 
 def poolw_poll_once(address: str) -> dict[str, float]:
     """What the pool currently credits to each worker name, in H/s (sessions summed)."""
-    with urllib.request.urlopen(POOL_STATS_API.format(address=address), timeout=15) as r:
+    provider = POOL_STATS_PROVIDERS.get(POOL_HOST.lower())
+    if provider is None:
+        return {}
+    endpoint, adapter = provider
+    with urllib.request.urlopen(endpoint.format(address=address), timeout=15) as r:
         data = json.loads(r.read().decode("utf-8"))
     agg: dict[str, float] = {}
     for w in data.get("workers", []):
-        name = str(w.get("name", "")).strip()
-        if not name or _seen_seconds_ago(w.get("lastSeen")) > POOLW_STALE_SECONDS:
+        name = str(w.get("name") or w.get("worker_id") or "").strip()
+        last_seen = w.get("lastSeen") if adapter == "public_pool" else w.get("last_share_at")
+        rate = w.get("hashRate") if adapter == "public_pool" else w.get("hashrate_5m_hs")
+        if not name or _seen_seconds_ago(last_seen) > POOLW_STALE_SECONDS:
             continue                                   # old session, device has moved on
-        agg[name.lower()] = agg.get(name.lower(), 0.0) + float(w.get("hashRate") or 0)
+        agg[name.lower()] = agg.get(name.lower(), 0.0) + float(rate or 0)
     return agg
 
 

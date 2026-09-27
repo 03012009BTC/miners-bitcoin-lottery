@@ -409,7 +409,18 @@ function render(st){
   const pa = document.getElementById("playerAddr");
   pa.textContent = st.address;
   pa.href = "https://mempool.space/address/" + st.address;
-  document.getElementById("poolLink").href = "https://web.public-pool.io/#/app/" + st.address;
+  const poolLink = document.getElementById("poolLink");
+  const poolHost = String(st.pool.host || "").toLowerCase();
+  if (poolHost === "stratum.btcpowlab-pool.com") {
+    poolLink.href = "https://btcpowlab-pool.com/miner/" + encodeURIComponent(st.address);
+    poolLink.textContent = "BTC PoW Lab stats ↗";
+  } else if (poolHost === "public-pool.io") {
+    poolLink.href = "https://web.public-pool.io/#/app/" + encodeURIComponent(st.address);
+    poolLink.textContent = "pool stats ↗";
+  } else {
+    poolLink.removeAttribute("href");
+    poolLink.textContent = "pool stats unavailable";
+  }
   const up = Math.max(0, Date.now()/1000 - st.start) | 0;
   document.getElementById("uptime").textContent =
     `${up/3600|0}:${String(up/60%60|0).padStart(2,"0")}:${String(up%60|0).padStart(2,"0")}`;
