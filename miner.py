@@ -338,9 +338,16 @@ class Stratum:
         self.job = None          # latest job from the pool
         self.clean = False       # clean_jobs — drop work in progress
         self.pending: dict[int, str] = {}  # request id -> method name
+        # request id -> (machine, age of its job when sent), so a rejected ticket
+        # can say which machine sent it and how stale the job already was
+        self.sent_by: dict[int, tuple[str, float | None]] = {}
+        self.job_seen: dict[str, float] = {}  # job id -> when the pool announced it
 
-    def send(self, method: str, params: list) -> int:
+    def send(self, method: str, params: list, who: str | None = None) -> int:
         self.msg_id += 1
+        if who is not None:
+            seen = self.job_seen.get(params[1])
+            self.sent_by[self.msg_id] = (who, None if seen is None else time.time() - seen)
         line = json.dumps({"id": self.msg_id, "method": method, "params": params}) + "\n"
         try:
             self.sock.sendall(line.encode())
@@ -380,6 +387,10 @@ class Stratum:
                 "merkle_branches": p[4], "version": p[5], "nbits": p[6], "ntime": p[7],
             }
             self.clean = bool(p[8])
+            self.job_seen[p[0]] = time.time()
+            if len(self.job_seen) > 64:                  # keep only recent jobs
+                for old in sorted(self.job_seen, key=self.job_seen.get)[:-64]:
+                    del self.job_seen[old]
             if self.clean:
                 print(f"[{name}] new job {p[0]} (new block — clean start)")
         elif method == "mining.set_difficulty":
@@ -1043,12 +1054,15 @@ def run_session(rig: CpuRig | None) -> None:
                     if m.get("id") in conn.pending:
                         method = conn.pending.pop(m["id"])
                         if method == "mining.submit":
+                            who, age = conn.sent_by.pop(m["id"], ("?", None))
                             if m.get("result"):
                                 accepted += 1
                                 print(f"[POOL ACCEPTED share #{accepted}] OK")
                             else:
                                 rejected += 1
-                                print(f"[pool rejected share: {m.get('error')}]")
+                                age_txt = "unknown" if age is None else f"{age:.1f} s"
+                                print(f"[pool rejected share: {m.get('error')}] "
+                                      f"from {who}, job age {age_txt}")
                             # STATS gets these under the lock further down the loop
                     else:
                         conn.handle(m, conn_name)
@@ -1115,7 +1129,7 @@ def run_session(rig: CpuRig | None) -> None:
                             if player:
                                 player["shares"] += 1
                         st_cpu.send("mining.submit",
-                                    [WORKER_CPU, job_id, en2, ntime, f"{n:08x}"])
+                                    [WORKER_CPU, job_id, en2, ntime, f"{n:08x}"], who=player_name)
                         print(f"[share] nonce {n:#010x} sent to pool "
                               f"({player_name}, hash ...{h[::-1].hex()[:16]})")
                         record_ticket(DIFF1_TARGET / h_int, n, player_name)
@@ -1142,7 +1156,7 @@ def run_session(rig: CpuRig | None) -> None:
                             if h_int > cpu_target:
                                 continue          # safety re-check
                             st_cpu.send("mining.submit",
-                                        [WORKER_CPU, job_id, en2, ntime, f"{n:08x}"])
+                                        [WORKER_CPU, job_id, en2, ntime, f"{n:08x}"], who=rig.name)
                             rig.shares += 1
                             print(f"[share] nonce {n:#010x} sent to pool "
                                   f"({rig.name}, hash ...{h[::-1].hex()[:16]})")
@@ -1239,7 +1253,8 @@ def run_session(rig: CpuRig | None) -> None:
                                     stick.hits.append(time.time())
                                     if h_int <= target:
                                         st.send("mining.submit",
-                                                [WORKER, job_id, en2, ntime, f"{n:08x}"])
+                                                [WORKER, job_id, en2, ntime, f"{n:08x}"],
+                                                who=stick.name)
                                         stick.shares += 1
                                         print(f"[share] nonce {n:#010x} sent to pool "
                                               f"({stick.name}, hash ...{h[::-1].hex()[:16]})")
@@ -1278,7 +1293,7 @@ def run_session(rig: CpuRig | None) -> None:
                         jal.hits.append(time.time())
                         if h_int <= target:
                             st.send("mining.submit",
-                                    [WORKER, job_id, en2, ntime, f"{n:08x}"])
+                                    [WORKER, job_id, en2, ntime, f"{n:08x}"], who=jal.name)
                             jal.shares += 1
                             print(f"[share] nonce {n:#010x} sent to pool "
                                   f"({jal.name}, hash ...{h[::-1].hex()[:16]})")
