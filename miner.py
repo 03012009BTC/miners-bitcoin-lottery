@@ -503,7 +503,7 @@ POOL_STATS_PROVIDERS = {
         "public_pool",
     ),
     "stratum.btcpowlab-pool.com": (
-        "https://btcpowlab-pool.com/public/v1/miner/{address}",
+        "https://btcpowlab-pool.com/public/v1/miner/{address}/summary",
         "btc_pow_lab",
     ),
 }
