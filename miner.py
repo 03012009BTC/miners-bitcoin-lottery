@@ -602,15 +602,17 @@ def axeos_poll_once(host: str) -> dict | None:
     # anything far from what the board is built for is simply not believed.
     expected = float(d.get("expectedHashrate") or 0) * 1e9
     if expected > 0 and not (0.1 * expected <= hs <= 3 * expected):
-        with AXEOS_LOCK:
-            believable = AXEOS.get(host, {}).get("hs")
+        # Ask the pool first: it counts this device's shares and cannot be
+        # fooled by the device's arithmetic, and its (smoothed) rate keeps
+        # moving with the machine. Our own last good reading is only the
+        # fallback - used first, it froze the board on one number for two
+        # weeks (872 GH/s, later 788) while the pool saw ~1,060.
+        worker = str(d.get("stratumUser") or "").rsplit(".", 1)[-1].strip().lower()
+        with POOLW_LOCK:
+            believable = POOL_RATES.get(worker)
         if believable is None:
-            # Nothing believable of our own — ask the pool, which counts this
-            # device's shares and cannot be fooled by its arithmetic. Without
-            # this the device could never come back once it had dropped out.
-            worker = str(d.get("stratumUser") or "").rsplit(".", 1)[-1].strip().lower()
-            with POOLW_LOCK:
-                believable = POOL_RATES.get(worker)
+            with AXEOS_LOCK:
+                believable = AXEOS.get(host, {}).get("hs")
         if believable is None:
             return None
         hs = believable
