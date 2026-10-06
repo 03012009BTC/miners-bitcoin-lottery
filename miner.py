@@ -514,7 +514,8 @@ POOL_RATES: dict[str, float] = {}    # every worker the pool sees -> H/s, for cr
 POOL_HISTORY: dict[str, deque] = {}
 POOLW_POLL_SECONDS = 60
 POOLW_SMOOTH = 20                    # readings kept per worker, so ~20 minutes of them
-POOLW_STALE_SECONDS = 900          # a session quiet this long is not in the game any more
+POOLW_STALE_SECONDS = 900          # a session quiet this long is not in the game any more...
+POOLW_SLOW_SECONDS = 6 * 3600      # ...unless it is all that machine has (see poolw_poll_once)
 
 
 def _seen_seconds_ago(iso: str | None) -> float:
@@ -534,11 +535,24 @@ def poolw_poll_once(address: str) -> dict[str, float]:
     with urllib.request.urlopen(POOL_STATS_API.format(address=address), timeout=15) as r:
         data = json.loads(r.read().decode("utf-8"))
     agg: dict[str, float] = {}
+    # A pool only updates "last seen" when a ticket arrives, and a slow machine
+    # sends one rarely: a NerdMiner at ~60 kH/s went quiet for 20 minutes at a
+    # time and blinked on and off the dashboard. So a worker with no recent
+    # session keeps its most recent one, as long as that is under six hours
+    # old - one session, not a sum, so a reconnect's leftover is not doubled.
+    latest: dict[str, tuple[float, float]] = {}        # name -> (age, rate)
     for w in data.get("workers", []):
-        name = str(w.get("name", "")).strip()
-        if not name or _seen_seconds_ago(w.get("lastSeen")) > POOLW_STALE_SECONDS:
-            continue                                   # old session, device has moved on
-        agg[name.lower()] = agg.get(name.lower(), 0.0) + float(w.get("hashRate") or 0)
+        name = str(w.get("name", "")).strip().lower()
+        if not name:
+            continue
+        age = _seen_seconds_ago(w.get("lastSeen"))
+        rate = float(w.get("hashRate") or 0)
+        if age <= POOLW_STALE_SECONDS:
+            agg[name] = agg.get(name, 0.0) + rate
+        elif age <= POOLW_SLOW_SECONDS and (name not in latest or age < latest[name][0]):
+            latest[name] = (age, rate)
+    for name, (_, rate) in latest.items():
+        agg.setdefault(name, rate)
     return agg
 
 
