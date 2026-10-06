@@ -76,8 +76,16 @@ need, save, then close the miner window and start it again.
   "browser_mining": true/false = allow the PLAY button for phones
   "worker_name":  name of your sticks on the pool website
   "dashboard_port": 8888 = the number after the ":" in the address
+  "axeos_devices": ["192.168.1.50"] = show a Bitaxe (or other
+                  AxeOS miner) on the dashboard - put its IP here
+  "pool_workers": ["nerdminer"] = show a miner that has no screen
+                  to read (e.g. a NerdMiner) by asking the pool
 
 Everything else is fine at default.
+
+Got a ready-made miner (Bitaxe, NerdMiner...)? Before anything
+else, open its settings and CHECK THE BITCOIN ADDRESS - in the
+main pool AND the backup pool. Ours came set to the seller's.
 
 
 4. FREQUENTLY ASKED QUESTIONS

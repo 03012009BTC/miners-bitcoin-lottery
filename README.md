@@ -1,7 +1,9 @@
 # MINERS — Bitcoin Lottery ⛏🎰
 
 **A pure-Python solo ("lottery") Bitcoin miner for retro USB ASIC sticks from 2013,
-with a retro-CRT web dashboard.** No binaries. No dependencies except `pyserial`.
+with a retro-CRT web dashboard — and a place on that same dashboard for the modern
+open-source miners (Bitaxe & co.) that play the same lottery today.**
+No binaries. No dependencies except `pyserial`.
 Every line of code is readable — because you should never run mining software you
 can't read (see the warning below).
 
@@ -10,7 +12,7 @@ can't read (see the warning below).
 > your ticket is real, the drawing happens every ~10 minutes, and somebody always wins.
 > While you play, you live. 🙂
 
-![The Bitcoin Lottery dashboard — live view with two Blue Fury sticks in the game](docs/dashboard.png)
+![The Bitcoin Lottery dashboard — two 2013 Blue Fury sticks, a Butterfly Labs Jalapeño and a Bitaxe in one game](docs/dashboard.png)
 
 ## Supported hardware
 
@@ -19,6 +21,9 @@ can't read (see the warning below).
 | Blue Fury / Red Fury (BF1) | Bitfury, binary protocol | ~2.6 GH/s | ✅ mining, multi-stick + hotplug |
 | Butterfly Labs Jalapeño (BFLSC) | 2× BFL SC, text protocol | ~4.5–5.3 GH/s | ✅ mining, hotplug, temp watch |
 | Bi•Fury (BXF) | 2× Bitfury, text protocol | ~5 GH/s | identification branch only |
+
+Machines that mine on their own can sit on the same dashboard — see
+[*Bitaxe and friends*](#bitaxe-and-friends-on-the-same-dashboard-) below.
 
 **Got an old stick in a drawer?** → **[Does my old USB Bitcoin miner still work?](HARDWARE.md)**
 — what is supported, what is not (yet), how to find out which device you have, and
@@ -60,6 +65,43 @@ its own SHA-256 implementation (~0.3–1 MH/s per device; validated against hist
 block 125552) and reports candidates to `/submit`, which verifies every one before
 submitting it to the pool. Set `browser_mining` to `false` in `config.json` to disable.
 
+## Bitaxe and friends on the same dashboard ⚡
+
+Modern open-source miners (Bitaxe Gamma/Supra/Ultra, NerdQAxe, NerdOCTAxe — anything
+running **AxeOS**) talk to the pool by themselves; this miner never sends them work.
+It can still put them in *Machines in the game*, next to the 2013 sticks:
+
+```json
+"axeos_devices": ["192.168.1.50"]
+```
+
+The miner reads `http://<ip>/api/system/info` every 10 s and shows the device's
+hashrate, temperature and tickets, and announces in the draws feed whenever it
+beats its own best ticket.
+
+Two things learned on a real Gamma 601, both handled for you:
+
+- **AxeOS's own hashrate figure is not to be trusted.** We have seen it report
+  401 TH/s from a 20 W board one afternoon and a flat 0 the next morning, while the
+  pool kept paying it tickets. Anything outside 0.1–3× the board's expected rate is
+  replaced by what **the pool** measures for that worker (averaged over ~20 minutes,
+  because a pool's short windows swing on luck alone).
+- **Wi-Fi drops are not a dead device.** A board that can't be reached is kept on the
+  dashboard, as the pool sees it, until the pool stops seeing it too.
+
+**A miner with no API at all** (a NerdMiner, a friend's rig mining to your address)
+can still be shown — the pool is the sensor:
+
+```json
+"pool_workers": ["nerdminer"]
+```
+
+Only the names you list are shown, so nothing is counted twice.
+
+> ⚠️ **Check the payout address on any pre-built miner before you plug it in.**
+> Our Bitaxe arrived configured to mine to the *seller's* address — in the main pool
+> **and** in the fallback pool. It would have won them the block. Look at both.
+
 `config.json` options:
 
 | Key | Default | Meaning |
@@ -72,6 +114,10 @@ submitting it to the pool. Set `browser_mining` to `false` in `config.json` to d
 | `browser_mining` | `true` | allow phones/PCs to join via the dashboard's PLAY button |
 | `suggest_difficulty` | `256` | share difficulty asked for the sticks |
 | `dashboard_port` | `8888` | the dashboard/stats web port |
+| `pool_host` / `pool_port` | `public-pool.io` / `21496` | the Stratum pool |
+| `pool_user` | `""` | pool login when it is not your address (Braiins, Ocean…); empty = use `btc_address` |
+| `axeos_devices` | `[]` | IP addresses of Bitaxe-style miners to show on the dashboard |
+| `pool_workers` | `[]` | worker names to show as seen by the pool (miners with no API) |
 
 ## FAQ (the honest basics)
 
@@ -139,6 +185,7 @@ Windows then binds the stock `usbser` driver and a COM port appears.
 | `jalapeno_test.py` | BFLSC (Jalapeño) known-block self-test |
 | `identify.py` | identify connected sticks |
 | `dashboard.html` | the Bitcoin Lottery dashboard (works double-clicked or served at `:8888`) |
+| `telegram_report.py` / `telegram_bot.py` | optional daily report and remote control over Telegram (stdlib only) |
 | `START_MINING.bat` | double-click launcher (logs to `miner.log`) |
 | `NOTEBOOK_FIX_USB.bat` | one-off laptop fix: stop Windows suspending your USB miners |
 | `lottery_best.json` | your best "ticket" ever (persistent) |

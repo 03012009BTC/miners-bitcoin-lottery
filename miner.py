@@ -401,7 +401,7 @@ class Stratum:
 def connect_pool(worker: str, diff: float, name: str) -> Stratum:
     """Connect + subscribe + authorize one Stratum session; wait for the first job."""
     st = Stratum(POOL_HOST, POOL_PORT, name)
-    st.send("mining.subscribe", ["miners-bitcoin-lottery/1.0"])
+    st.send("mining.subscribe", ["miners-bitcoin-lottery/1.2"])
     st.send("mining.authorize", [worker, "x"])
     st.send("mining.suggest_difficulty", [diff])
     start = time.time()

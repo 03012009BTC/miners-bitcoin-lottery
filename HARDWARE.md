@@ -39,15 +39,24 @@ Nobody here owns one of these. If you do and you want it to work, open an issue
 
 ## Devices that mine on their own
 
-These do **not** need this software: they run their own firmware and talk to a
-pool by themselves. Point them at your own address and they play the same
-lottery.
+These do **not** need this software to mine: they run their own firmware and
+talk to a pool by themselves. Point them at your own address and they play the
+same lottery — and this project can still show them on its dashboard.
 
 | Device | What this project can do with it |
 |---|---|
-| **Bitaxe** (Ultra / Supra / Gamma, BM1366–BM1370) | Runs AxeOS, which has an HTTP API — showing it on the dashboard alongside the old sticks is planned. |
-| **NerdMiner / NMMiner** (ESP32) | No local API to read; it will show up as a worker on your pool, but not on the dashboard. |
-| **Antminer S9 and friends** | Has the cgminer API on port 4028 — readable in principle, same idea as AxeOS. |
+| **Bitaxe** (Ultra / Supra / Gamma, BM1366–BM1370), NerdQAxe, NerdOCTAxe — anything on **AxeOS** | ✅ **On the dashboard** with `"axeos_devices": ["<ip>"]` — hashrate, temperature, tickets, new-best announcements. Tested live on a **Bitaxe Gamma 601: ~0.9–1.05 TH/s at 20 W, 57–61 °C** (sold as 1.2–1.5 TH/s). |
+| **NerdMiner / NMMiner** (ESP32) | No local API, but it shows up on the dashboard **through the pool** with `"pool_workers": ["<worker name>"]`. ~70–80 kH/s: a desk ornament, not a contribution — a Bitaxe does in one second what it does in five months. |
+| **Antminer S9 and friends** | Has the cgminer API on port 4028 — readable in principle, same idea as AxeOS. Not done yet. |
+
+**Before you power up any pre-built miner, check where it pays.** Our Bitaxe came
+configured with the **seller's** address in both the primary and the fallback pool
+(`stratumUser` and `fallbackStratumUser` in AxeOS). Fix both.
+
+**Don't trust AxeOS's own hashrate number.** On the Gamma 601 it has reported
+401 TH/s and, for weeks, a flat 0 — while the board drew 20 W and the pool kept
+accepting its tickets. Its own OLED and the pool were right; the API field was not.
+The dashboard therefore cross-checks it against the pool.
 
 ---
 
