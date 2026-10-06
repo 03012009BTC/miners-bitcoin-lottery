@@ -344,14 +344,18 @@
 /* ============ DATA SOURCE: the running miner (port 8888) ============ */
 const API = location.protocol === "file:" ? "http://localhost:8888" : "";
 let NET_DIFF = 126.23e12, LOG_MAX = Math.log10(NET_DIFF);
-const COLS = ["#1ea452", "#2790c4", "#b57a00"];
+const COLS = ["#1ea452", "#2790c4", "#7a9a2f"];   // sticks; orange stays the Jalapeno's alone
 const CPU_COL = "#8a8a8a";
 // color follows the device, not its position: sticks take the fixed palette, the CPU is always grey
 const BITAXE_COL = "#8b5cf6";
 const POOL_COL = "#3aa0a0";
+// phones and tablets get their own colours: positional ones collided with the
+// Jalapeno's orange or a stick's blue as soon as a browser joined the game
+const BROWSER_COL = name => name.includes("iOS") ? "#d9534f" : "#d0508a";
 const colFor = (name, i) => name.startsWith("CPU") ? CPU_COL
   : name.startsWith("Jalapeno") ? "#b57a00"
   : name.startsWith("Bitaxe") ? BITAXE_COL
+  : name.startsWith("Browser") ? BROWSER_COL(name)
   : name.endsWith("(via pool)") ? POOL_COL : COLS[i % COLS.length];
 const fmt = (x, d=2) => x.toLocaleString("en-US", {minimumFractionDigits:d, maximumFractionDigits:d});
 const fmtRate = hs => hs>=1e9 ? fmt(hs/1e9,2)+" GH/s" : hs>=1e6 ? fmt(hs/1e6,2)+" MH/s" :
