@@ -58,6 +58,44 @@ configured with the **seller's** address in both the primary and the fallback po
 accepting its tickets. Its own OLED and the pool were right; the API field was not.
 The dashboard therefore cross-checks it against the pool.
 
+### A pre-built Bitaxe that is slower than it should be
+
+**Check the seller's tuning, not only the seller's address.** Our Gamma 601
+arrived overclocked *and* undervolted — **640 MHz at 1080 mV**, where the stock
+setting for the BM1370 is **525 MHz at 1150 mV**. More speed on less voltage is
+exactly the combination that starves part of the chip, and one quarter of ours
+simply stopped hashing. It did that from day one; we only noticed after a month.
+
+How to see it: open `http://<bitaxe-ip>/api/system/info` in a browser and look at
+
+- `hashrateMonitor` → `asics` → `domains` — the BM1370 is split into four
+  domains, each should report a similar number. One reading **0** means a quarter
+  of the chip is idle.
+- `errorPercentage` — ours was ~10 % at the seller's setting.
+- `frequency` / `coreVoltage` — compare with the stock values above.
+
+Neither a soft restart nor pulling the power fixed it. Changing the tuning did:
+
+| Setting | Domains (GH/s) | Total | Errors | Power | Chip temp |
+|---|---|---|---|---|---|
+| Seller: 640 MHz / 1080 mV | 330 / **0** / 320 / 320 | ~950 GH/s | ~10 % | 19.7 W | 58 °C |
+| Stock: 525 MHz / 1150 mV | ~265 / ~258 / ~268 / ~263 | ~1,050 GH/s | ~3.8 % | 18.4 W | 57 °C |
+| Kept: 600 MHz / 1150 mV | ~300 / ~300 / ~310 / ~300 | **~1,220 GH/s** | ~4 % | 20.9 W | 61 °C |
+
+That is **+28 %** from settings alone, for one extra watt. We stopped at 600 MHz:
+the fan was already at 100 % and the chip at 61 °C.
+
+To change it, use the AxeOS settings page, or from any computer on your network:
+
+```
+curl -X PATCH -H "Content-Type: application/json" -d "{\"frequency\":525,\"coreVoltage\":1150}" http://<bitaxe-ip>/api/system
+curl -X POST http://<bitaxe-ip>/api/system/restart
+```
+
+Start at stock, wait a few minutes, check that all four domains report and the
+error rate stays low, and only then step the frequency up. Note the original
+values first, so you can always go back.
+
 ---
 
 ## Which one do I even have?

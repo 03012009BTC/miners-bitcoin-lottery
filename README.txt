@@ -87,6 +87,10 @@ Got a ready-made miner (Bitaxe, NerdMiner...)? Before anything
 else, open its settings and CHECK THE BITCOIN ADDRESS - in the
 main pool AND the backup pool. Ours came set to the seller's.
 
+Ours was also set too fast on too little power by the seller,
+and a quarter of its chip did nothing. Factory setting for a
+Bitaxe Gamma 601 is 525 MHz / 1150 mV - see HARDWARE.md.
+
 
 4. FREQUENTLY ASKED QUESTIONS
 -----------------------------

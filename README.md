@@ -101,6 +101,12 @@ Only the names you list are shown, so nothing is counted twice.
 > ⚠️ **Check the payout address on any pre-built miner before you plug it in.**
 > Our Bitaxe arrived configured to mine to the *seller's* address — in the main pool
 > **and** in the fallback pool. It would have won them the block. Look at both.
+>
+> **And check its tuning.** The same Bitaxe was overclocked and undervolted by the
+> seller (640 MHz at 1080 mV instead of the stock 525 MHz at 1150 mV), and a quarter
+> of its chip had stopped hashing. Back at stock voltage it came alive; at
+> 600 MHz / 1150 mV it now does ~1.22 TH/s instead of ~0.95.
+> [How to check and fix it →](HARDWARE.md#a-pre-built-bitaxe-that-is-slower-than-it-should-be)
 
 `config.json` options:
 
