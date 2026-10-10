@@ -475,7 +475,7 @@ function render(st){
 
 /* ============ CHART (per-minute averages, last 60 min) ============ */
 const svg = document.getElementById("chart"), tip = document.getElementById("tip");
-const W=1040, H=210, L=46, R=110, T=10, B=24;
+const W=1040, H=210, L=46, R=110, T=22, B=24;   // T leaves room for the unit above the axis
 let chartData = [], chartNames = [];
 function seriesData(n){
   const now = Date.now(), out = Array.from({length:n}, ()=>Array(60).fill(null));
@@ -495,13 +495,17 @@ function drawChart(devs){
   const umax = Math.max(1, ...chartData.flat());
   const [uf, un] = umax>=1e9 ? [1e9,"GH/s"] : umax>=1e6 ? [1e6,"MH/s"] :
                    umax>=1e3 ? [1e3,"kH/s"] : [1,"H/s"];
-  const ymax = Math.max(1, Math.ceil(umax/uf));
+  // round steps (1, 2, 5 x 10^n) and a top line just above the data, so the axis
+  // reads 0 / 250 / 500 ... instead of 0 / 204 / 408 ... 1224 jammed against the unit
+  const raw = umax/uf, rough = raw/5, mag = 10 ** Math.floor(Math.log10(rough));
+  const step = [1,2,2.5,5,10].map(m=>m*mag).find(st=>st>=rough);
+  const ymax = Math.max(step, Math.ceil(raw/step)*step);
   const x = i => L + (W-L-R)*i/59, y = v => T + (H-T-B)*(1 - (v/uf)/ymax);
   let g = "";
-  for (let v=0; v<=ymax; v+=Math.max(1, Math.ceil(ymax/6)))
+  for (let k=0; k*step<=ymax+1e-9; k++){ const v = k*step;
     g += `<line x1="${L}" y1="${y(v*uf)}" x2="${W-R}" y2="${y(v*uf)}" stroke="var(--grid)"/>`
-       + `<text x="${L-8}" y="${y(v*uf)+4}" fill="var(--ink-dim)" font-size="11" text-anchor="end">${v}</text>`;
-  g += `<text x="${L-8}" y="${T+2}" fill="var(--ink-dim)" font-size="10" text-anchor="end">${un}</text>`;
+       + `<text x="${L-8}" y="${y(v*uf)+4}" fill="var(--ink-dim)" font-size="11" text-anchor="end">${+v.toFixed(2)}</text>`; }
+  g += `<text x="${L-8}" y="${T-10}" fill="var(--ink-dim)" font-size="10" text-anchor="end">${un}</text>`;
   [-60,-45,-30,-15,0].forEach(m=>{ const xi = x(Math.max(0, 59+m));
     g += `<text x="${xi}" y="${H-6}" fill="var(--ink-dim)" font-size="11" text-anchor="middle">${m ? m+" min" : "now"}</text>`});
   chartData.forEach((row,s)=>{
