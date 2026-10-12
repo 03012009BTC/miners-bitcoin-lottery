@@ -25,6 +25,8 @@ import urllib.request
 _DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_FILE = os.path.join(_DIR, "config.json")
 POOL_API = "https://public-pool.io:40557/api/client/{address}"
+HEIGHT_APIS = ("https://blockstream.info/api/blocks/tip/height",
+               "https://mempool.space/api/blocks/tip/height")
 TIMEOUT = 20
 
 
@@ -93,13 +95,16 @@ def build_report(cfg: dict) -> str:
         except Exception:
             lines.append("\U0001f4ca pool: unreachable right now")
 
-    # 3) where the network stands
-    try:
-        height = int(urllib.request.urlopen(
-            "https://mempool.space/api/blocks/tip/height", timeout=TIMEOUT).read())
-        lines.append(f"\U0001f9f1 block {height:,}")
-    except Exception:
-        pass
+    # 3) where the network stands. Short timeouts on purpose: mempool.space
+    # spreads over several addresses and from some networks (Starlink) most of
+    # them never answer, so one slow source could hold /status for two minutes.
+    for url in HEIGHT_APIS:
+        try:
+            height = int(urllib.request.urlopen(url, timeout=4).read())
+            lines.append(f"\U0001f9f1 block {height:,}")
+            break
+        except Exception:
+            continue
 
     lines.append("")
     lines.append("Good luck \U0001f340")
